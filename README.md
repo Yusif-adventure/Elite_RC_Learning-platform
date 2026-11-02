@@ -205,8 +205,8 @@ development.
 1. Files are uploaded through the backend, which stores them in Supabase
    Storage.
 2. Upload limits, checked in the browser and on the backend:
-   - Video previews: 5 MB
-   - Course and instructor images: 3 MB
+   - Video previews: 50 MB, the largest single file the Supabase project accepts
+   - Course and instructor images: 10 MB
    - Slide files: 20 MB
 3. Large media files must be stored in object/blob storage rather than browser
    local storage or a relational database record.
@@ -405,7 +405,7 @@ production use.
 - Configure access policies for private instructor resources.
 - Generate signed URLs where resources should not be public.
 - Add video processing or transcoding for browser-compatible playback.
-- Support larger video files after moving away from browser local storage.
+- Support video files over 50 MB, which is the Supabase project's limit today.
 
 ### Course publishing workflow
 

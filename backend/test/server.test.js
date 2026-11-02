@@ -434,9 +434,9 @@ test("an empty file is refused", async () => {
 });
 
 const sizeLimits = [
-  ["course-image", "wing.png", 3],
-  ["instructor-image", "ama.png", 3],
-  ["video", "preview.mp4", 20],
+  ["course-image", "wing.png", 10],
+  ["instructor-image", "ama.png", 10],
+  ["video", "preview.mp4", 50],
   ["slide", "lesson.pdf", 20],
 ];
 

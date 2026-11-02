@@ -9,11 +9,11 @@ import type {
 import "./courseBuilder.css";
 
 const MEGABYTE = 1024 * 1024;
-const MAX_IMAGE_BYTES = 3 * MEGABYTE;
-const MAX_VIDEO_BYTES = 20 * MEGABYTE;
+const MAX_IMAGE_BYTES = 10 * MEGABYTE;
+const MAX_VIDEO_BYTES = 50 * MEGABYTE;
 const MAX_SLIDE_BYTES = 20 * MEGABYTE;
 const IMAGE_TYPES = ".png,.jpg,.jpeg,.webp,.gif";
-const IMAGE_HINT = "PNG, JPG, WEBP or GIF, up to 3 MB";
+const IMAGE_HINT = "PNG, JPG, WEBP or GIF, up to 10 MB";
 const DIFFICULTIES = ["Beginner", "Intermediate", "Advanced"];
 // These match the filters on the Explore Courses page.
 const CATEGORIES = ["RC Planes", "RC Cars", "RC Boats", "Electronics"];
@@ -865,7 +865,7 @@ export function CourseBuilderPage({
                         </FileField>
                         <FileField
                           label="Short video preview"
-                          hint="MP4 plays best, up to 20 MB"
+                          hint="MP4 plays best, up to 50 MB"
                           accept=".mp4,.webm,.mov"
                           replacing={Boolean(lesson.video)}
                           onFiles={async (files) => {

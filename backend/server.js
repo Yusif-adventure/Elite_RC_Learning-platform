@@ -32,7 +32,8 @@ const supabaseAdmin = supabaseUrl && supabaseServiceKey
   : null;
 
 const MEGABYTE = 1024 * 1024;
-const MAX_UPLOAD_BYTES = 20 * MEGABYTE;
+// The largest single file the team's Supabase project accepts.
+const MAX_UPLOAD_BYTES = 50 * MEGABYTE;
 const imageTypes = {
   ".gif": "image/gif",
   ".jpeg": "image/jpeg",
@@ -44,19 +45,19 @@ const uploadKinds = {
   "course-image": {
     label: "Course image",
     bucket: "course-images",
-    maxBytes: 3 * MEGABYTE,
+    maxBytes: 10 * MEGABYTE,
     types: imageTypes,
   },
   "instructor-image": {
     label: "Instructor image",
     bucket: "instructor-images",
-    maxBytes: 3 * MEGABYTE,
+    maxBytes: 10 * MEGABYTE,
     types: imageTypes,
   },
   slide: {
     label: "Slide file",
     bucket: "lesson-resources",
-    maxBytes: MAX_UPLOAD_BYTES,
+    maxBytes: 20 * MEGABYTE,
     types: {
       ".key": "application/vnd.apple.keynote",
       ".pdf": "application/pdf",
@@ -67,7 +68,7 @@ const uploadKinds = {
   video: {
     label: "Video preview",
     bucket: "lesson-resources",
-    maxBytes: 20 * MEGABYTE,
+    maxBytes: MAX_UPLOAD_BYTES,
     types: {
       ".mov": "video/quicktime",
       ".mp4": "video/mp4",

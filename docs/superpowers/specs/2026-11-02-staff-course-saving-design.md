@@ -23,7 +23,7 @@ other members.
 ## Not in this work
 
 - Sign-in or staff-only protection (Wednesday).
-- Draft and publish screens, upload progress bars, larger video support, and
+- Draft and publish screens, upload progress bars, and
   live updates without a refresh.
 
 ## Must not happen
@@ -55,8 +55,10 @@ Backend (`backend/server.js`):
   becomes public if Wednesday's sign-in uses it in the browser. Without the
   secret key, courses can still be read, but saving and uploads return a clear
   error. Eugene approved this use of the key, and the teammate is to be told.
-- *My call:* limits are 3 MB for images and 5 MB for video previews (both
-  unchanged) and 20 MB for slides, which have no limit today.
+- *My call:* limits are 10 MB for images, 20 MB for slides, and 50 MB for video
+  previews. The first version kept the 3 MB and 5 MB limits from browser
+  storage, which no longer apply. 50 MB is the largest single file the team's
+  Supabase project accepts (tested 2026-11-02).
 - Reject repeated section titles, repeated lesson titles within a section, and
   lessons with no matching section before any data changes.
 - If an edit fails partway, put the previous sections and lessons back.
@@ -111,6 +113,13 @@ File layout, how the upload route receives files, and the exact messages.
 
 - Deleting a course, or removing or replacing a file in the form, does not remove
   the file from storage.
+- A 50 MB file took about a minute to reach Supabase in testing, and the form
+  shows only "Uploading..." with no progress bar. Node stops receiving a request
+  after 5 minutes, so a very slow connection can fail on a large file.
+- Big files also load slowly for learners. An 11 MB file took 16 to 145 seconds to
+  download on the builder's connection, so previews should stay compressed.
+- If the connection drops during an upload, the form shows "fetch failed", which
+  is not a clear message.
 
 ## Handoff
 
@@ -119,5 +128,5 @@ File layout, how the upload route receives files, and the exact messages.
   writes to `courses`, but the SQL file does not turn on row-level security, so a
   new project built from it would not. Check every table before the anon key is
   used in the browser.
-- **Thursday:** the backend host must accept 20 MB requests, which rules out
+- **Thursday:** the backend host must accept 50 MB requests, which rules out
   hosts with smaller limits. Set `SUPABASE_SERVICE_ROLE_KEY` on the host.
