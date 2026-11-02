@@ -20,6 +20,94 @@ Course data is currently saved in the browser under the
 database integration, but the frontend is not yet using it as its primary
 course store.
 
+## Friday shared-pilot release plan
+
+The target is a shared member pilot for Friday, November 6. Members should be
+able to use the platform from different devices while we continue improving
+the product.
+
+### Friday MVP scope
+
+The following capabilities must work before release:
+
+1. Members can open the deployed site from different devices.
+2. The course catalog and course content are shared rather than
+   browser-specific.
+3. Learners can browse courses, open course details, select the correct lesson,
+   open slides and resources, watch previews, and open YouTube lessons.
+4. Staff access is protected.
+5. The site works on mobile and desktop.
+6. Production deployment, error handling, and rollback instructions are ready.
+
+Advanced profile editing, detailed progress tracking, staff dashboard
+improvements, upload optimization, analytics, notifications, and course draft
+workflows should not expand the Friday scope unless the core release is
+already stable.
+
+### Current launch blockers
+
+- Courses are stored in browser `localStorage`, so members will not see the
+  same courses across devices.
+- The backend currently provides only health, status, and course-listing
+  endpoints.
+- Sign-in is currently a placeholder and does not authenticate users.
+- Instructor access is currently unrestricted.
+- Production deployment configuration is not complete.
+
+### Week-of-release focus
+
+#### Sunday - Decide and prepare
+
+- Freeze the Friday MVP scope.
+- Confirm the Supabase project and production credentials.
+- Prepare the initial course content members should see.
+- Prepare a launch checklist and test accounts.
+
+#### Monday - Build shared course data
+
+- Create Supabase tables for courses, sections, lessons, objectives, and
+  resources.
+- Add the initial course data.
+- Add API endpoints for reading and managing courses.
+- Add storage buckets for images, slides, and video previews.
+
+#### Tuesday - Connect the frontend
+
+- Replace `localStorage` as the primary course source.
+- Add loading and error states.
+- Make staff create, edit, and delete actions use the backend.
+- Verify that a course created in one browser appears in another browser.
+
+#### Wednesday - Add access control and test
+
+- Add real Supabase authentication for members.
+- Protect staff and instructor access.
+- Test the complete learner path with real content.
+- Test mobile layout, broken links, missing images, and invalid uploads.
+
+#### Thursday - Prepare production
+
+- Deploy the backend and frontend.
+- Configure production environment variables and CORS.
+- Test from a clean browser and a second device.
+- Fix only release-blocking issues.
+- Prepare member instructions and a rollback plan.
+
+#### Friday - Release
+
+- Run a final smoke test.
+- Publish the release announcement.
+- Monitor errors and member feedback.
+- Record improvements for the next release instead of expanding Friday's
+  scope.
+
+### Recommended fallback
+
+Do not release the current browser-only course storage as a shared member
+platform. If Supabase integration cannot be completed by Tuesday, launch with
+preloaded, read-only shared courses and defer staff course editing until the
+next release.
+
 ## Features
 
 ### Learner experience
@@ -137,6 +225,8 @@ src/
 │   ├── server.js
 │   ├── package.json
 │   └── .env.example
+├── supabase/
+│   └── 001_shared_course_data.sql
 └── README.md
 ```
 
@@ -153,9 +243,11 @@ src/
 ### Backend files
 
 - [`backend/server.js`](./backend/server.js): Express server, health endpoint,
-  Supabase status endpoint, and course listing endpoint.
+  Supabase status endpoint, and course CRUD endpoints.
 - [`backend/.env.example`](./backend/.env.example): required environment
   variable names.
+- [`supabase/001_shared_course_data.sql`](./supabase/001_shared_course_data.sql):
+  database tables, seed courses, indexes, and storage buckets.
 
 ## Running the project
 
@@ -195,13 +287,37 @@ endpoint:
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
 PORT=5000
+FRONTEND_ORIGIN=http://localhost:5173
 ```
+
+The frontend reads shared courses from the backend API. For local development,
+the default API URL is `http://localhost:5000`. To use another backend URL,
+create `frontend/.env` from [`frontend/.env.example`](./frontend/.env.example)
+and set `VITE_API_URL`.
 
 The backend exposes:
 
 - `GET /health`
 - `GET /api/status`
 - `GET /api/courses`
+- `GET /api/courses/:id`
+- `POST /api/courses`
+- `PUT /api/courses/:id`
+- `DELETE /api/courses/:id`
+
+### Supabase setup
+
+1. Create a Supabase project.
+2. Open the Supabase SQL Editor.
+3. Run [`supabase/001_shared_course_data.sql`](./supabase/001_shared_course_data.sql).
+4. Copy the project URL and anon key into `backend/.env`.
+5. Start the backend and verify `GET http://localhost:5000/api/status`.
+
+The migration creates normalized course, objective, section, lesson, and
+resource tables. It also seeds two courses and creates public-read storage
+buckets for course images, instructor images, and lesson resources. Upload
+permissions and authenticated write access should be added with the
+authentication work before production release.
 
 ## Planned database integration
 

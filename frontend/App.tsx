@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   CourseBuilderPage,
   InstructorWorkspace,
@@ -388,6 +388,7 @@ function Logo({ dark = false }: { dark?: boolean }) {
 
 type Course = StaffCourse;
 type LessonSelection = { course: Course; lessonIndex: number };
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 function loadCourses(): Course[] {
   try {
@@ -1245,7 +1246,47 @@ export default function App() {
   const [selectedCourse, setSelectedCourse] = useState<Course>(courses[0]);
   const [selectedLessonIndex, setSelectedLessonIndex] = useState(0);
   const [editingCourse, setEditingCourse] = useState<Course>();
-  const [, refreshCourses] = useState(0);
+  const [courseVersion, refreshCourses] = useState(0);
+  const [courseLoadState, setCourseLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [courseLoadError, setCourseLoadError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchCourses() {
+      try {
+        const response = await fetch(`${API_URL}/api/courses`);
+        if (!response.ok) {
+          throw new Error(`Course service returned ${response.status}.`);
+        }
+        const payload: { courses?: Course[] } = await response.json();
+        if (!Array.isArray(payload.courses)) {
+          throw new Error("Course service returned an invalid response.");
+        }
+        if (!active) return;
+        courses = payload.courses;
+        if (courses.length > 0) setSelectedCourse(courses[0]);
+        setCourseLoadState("ready");
+        setCourseLoadError("");
+        refreshCourses((version) => version + 1);
+      } catch (error) {
+        if (!active) return;
+        setCourseLoadState("error");
+        setCourseLoadError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load shared courses.",
+        );
+        refreshCourses((version) => version + 1);
+      }
+    }
+
+    fetchCourses();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const saveCourse = (course: Course) => {
     const existingIndex = editingCourse
       ? courses.findIndex((item) => item.title === editingCourse.title)
@@ -1284,6 +1325,51 @@ export default function App() {
     setPage(nextPage);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+  void courseVersion;
+  if (courseLoadState === "loading") {
+    return (
+      <main className="auth">
+        <section>
+          <Logo />
+          <div>
+            <span className="eyebrow light">ELITE RC LEARNING HUB</span>
+            <h1>Loading shared courses.</h1>
+            <p>Connecting to the course library...</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
+  if (courseLoadState === "error") {
+    return (
+      <main className="auth">
+        <section>
+          <Logo />
+          <div>
+            <span className="eyebrow light">COURSE LIBRARY UNAVAILABLE</span>
+            <h1>We could not load shared courses.</h1>
+            <p>{courseLoadError}</p>
+            <Button onClick={() => window.location.reload()}>Retry</Button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+  if (courses.length === 0) {
+    return (
+      <main className="auth">
+        <section>
+          <Logo />
+          <div>
+            <span className="eyebrow light">COURSE LIBRARY</span>
+            <h1>No published courses yet.</h1>
+            <p>Publish a course in Supabase, then refresh this page.</p>
+            <Button onClick={() => window.location.reload()}>Refresh</Button>
+          </div>
+        </section>
+      </main>
+    );
+  }
   return page === "home" ? (
     <Home />
   ) : page === "explore" ? (
