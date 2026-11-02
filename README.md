@@ -12,13 +12,13 @@ The project currently contains:
 - A React and Vite frontend in [`frontend/`](./frontend/)
 - An Express backend scaffold in [`backend/`](./backend/)
 - A Supabase connection/status check in the backend
-- Browser-local course persistence in the frontend
+- Shared course data through the backend and Supabase
 - A production frontend build that completes successfully
 
-Course data is currently saved in the browser under the
-`elite-rc-courses` local-storage key. The backend is prepared for the later
-database integration, but the frontend is not yet using it as its primary
-course store.
+Courses, lessons, and uploaded files are stored in Supabase and reached through
+the backend, so every browser sees the same courses. Sign-in and staff
+protection are not connected yet, so do not share the backend URL until they
+are.
 
 ## Friday shared-pilot release plan
 
@@ -137,6 +137,8 @@ next release.
   - Course title
   - Description
   - Difficulty
+  - Category
+  - Duration
   - Instructor name
   - Instructor image
   - Course image
@@ -148,7 +150,7 @@ next release.
 - Add a full YouTube video URL
 - Edit an existing course
 - Delete an existing course with confirmation
-- Save courses to browser storage
+- Save courses to the shared database
 
 ## User requirements
 
@@ -200,14 +202,14 @@ development.
 
 ### Media and storage
 
-1. The current browser-only prototype must protect users from exceeding
-   browser storage limits.
-2. Current upload guidance limits:
-   - Video previews: less than 5 MB
-   - Course and instructor images: less than 3 MB
-3. When a real backend is connected, large media files must be stored in
-   object/blob storage rather than browser local storage or a relational
-   database record.
+1. Files are uploaded through the backend, which stores them in Supabase
+   Storage.
+2. Upload limits, checked in the browser and on the backend:
+   - Video previews: 5 MB
+   - Course and instructor images: 3 MB
+   - Slide files: 20 MB
+3. Large media files must be stored in object/blob storage rather than browser
+   local storage or a relational database record.
 4. The database should store media metadata and URLs, not large base64 files.
 
 ## Project structure
@@ -233,10 +235,14 @@ src/
 ### Important frontend files
 
 - [`frontend/App.tsx`](./frontend/App.tsx): public pages, navigation,
-  course state, lesson rendering, and local-storage persistence.
+  course state, and lesson rendering.
+- [`frontend/features/staff/courseApi.ts`](./frontend/features/staff/courseApi.ts):
+  requests that save courses and upload files.
 - [`frontend/features/staff/StaffPages.tsx`](./frontend/features/staff/StaffPages.tsx):
-  staff workspace, instructor workspace, course builder, file uploads, and
-  course management actions.
+  staff workspace, instructor workspace, and course management actions.
+- [`frontend/features/staff/CourseBuilderPage.tsx`](./frontend/features/staff/CourseBuilderPage.tsx)
+  and [`courseBuilder.css`](./frontend/features/staff/courseBuilder.css):
+  the form for creating and editing courses, including file uploads.
 - [`frontend/index.css`](./frontend/index.css): application layout and visual
   styling.
 
@@ -286,9 +292,16 @@ endpoint:
 ```text
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 PORT=5000
 FRONTEND_ORIGIN=http://localhost:5173
 ```
+
+`SUPABASE_SERVICE_ROLE_KEY` lets the backend save courses and store uploaded
+files, because row-level security refuses writes from the anon key. It has full
+access to the Supabase project, so keep it only in the backend's environment and
+never put it in the frontend, a chat, or Git. Without it, courses can still be
+read, but saving and uploads return a clear error.
 
 The frontend reads shared courses from the backend API. For local development,
 the default API URL is `http://localhost:5000`. To use another backend URL,
@@ -304,13 +317,14 @@ The backend exposes:
 - `POST /api/courses`
 - `PUT /api/courses/:id`
 - `DELETE /api/courses/:id`
+- `POST /api/uploads`
 
 ### Supabase setup
 
 1. Create a Supabase project.
 2. Open the Supabase SQL Editor.
 3. Run [`supabase/001_shared_course_data.sql`](./supabase/001_shared_course_data.sql).
-4. Copy the project URL and anon key into `backend/.env`.
+4. Copy the project URL, anon key, and service role key into `backend/.env`.
 5. Start the backend and verify `GET http://localhost:5000/api/status`.
 
 The migration creates normalized course, objective, section, lesson, and
@@ -512,6 +526,14 @@ The frontend has been validated with:
 
 ```powershell
 npm run build
+```
+
+The backend has automated tests that run against an in-memory stand-in for
+Supabase, so they never touch a real database:
+
+```powershell
+cd backend
+npm test
 ```
 
 There are currently no repository-level automated frontend tests. The main
