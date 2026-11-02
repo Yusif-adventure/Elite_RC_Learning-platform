@@ -6,7 +6,7 @@ import "./courseBuilder.css";
 
 const MEGABYTE = 1024 * 1024;
 const MAX_IMAGE_BYTES = 3 * MEGABYTE;
-const MAX_VIDEO_BYTES = 5 * MEGABYTE;
+const MAX_VIDEO_BYTES = 20 * MEGABYTE;
 const MAX_SLIDE_BYTES = 20 * MEGABYTE;
 const IMAGE_TYPES = ".png,.jpg,.jpeg,.webp,.gif";
 const IMAGE_HINT = "PNG, JPG, WEBP or GIF, up to 3 MB";
@@ -730,7 +730,7 @@ export function CourseBuilderPage({
                         </FileField>
                         <FileField
                           label="Short video preview"
-                          hint="MP4 plays best, up to 5 MB"
+                          hint="MP4 plays best, up to 20 MB"
                           accept=".mp4,.webm,.mov"
                           replacing={Boolean(lesson.video)}
                           onFiles={async (files) => {

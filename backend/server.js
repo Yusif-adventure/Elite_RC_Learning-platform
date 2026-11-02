@@ -67,7 +67,7 @@ const uploadKinds = {
   video: {
     label: "Video preview",
     bucket: "lesson-resources",
-    maxBytes: 5 * MEGABYTE,
+    maxBytes: 20 * MEGABYTE,
     types: {
       ".mov": "video/quicktime",
       ".mp4": "video/mp4",
