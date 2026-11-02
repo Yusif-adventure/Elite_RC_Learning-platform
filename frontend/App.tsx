@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  CourseBuilderPage,
   InstructorWorkspace,
   StaffCoursePreview,
   StaffOverview,
 } from "./features/staff/StaffPages";
+import { CourseBuilderPage } from "./features/staff/CourseBuilderPage";
 import type { CourseResource, StaffCourse } from "./features/staff/StaffPages";
+import { API_URL, createCourse, removeCourse, updateCourse } from "./features/staff/courseApi";
 
 type Page =
   | "home"
@@ -388,21 +389,8 @@ function Logo({ dark = false }: { dark?: boolean }) {
 
 type Course = StaffCourse;
 type LessonSelection = { course: Course; lessonIndex: number };
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
-
-function loadCourses(): Course[] {
-  try {
-    const stored = window.localStorage.getItem("elite-rc-courses");
-    if (!stored) return initialCourses;
-    const parsed: unknown = JSON.parse(stored);
-    return Array.isArray(parsed) ? (parsed as Course[]) : initialCourses;
-  } catch {
-    return initialCourses;
-  }
-}
 
 let courses: Course[] = initialCourses;
-courses = loadCourses();
 
 function getFeaturedCourses() {
   const createdCourses = courses.filter(
@@ -480,7 +468,7 @@ function CourseCard({ course, index = 0 }: { course: Course; index?: number }) {
           </span>
           <span>
             <Icon name="book" size={15} />
-            {course.lessons} lessons
+            {course.lessons} {course.lessons === 1 ? "lesson" : "lessons"}
           </span>
         </div>
         <Button variant={index === 0 ? "primary" : "outline"}>
@@ -742,15 +730,8 @@ function Explore() {
 function CourseDetails({ course }: { course: Course }) {
   const [open, setOpen] = useState(0);
   const lessonContent = course.lessonContent ?? [];
-  const lessonsForSection = (section: string, sectionIndex: number) => {
-    const savedLessons = lessonContent.filter((lesson) => lesson.section === section);
-    if (savedLessons.length) return savedLessons;
-    return sectionIndex === 0
-      ? course.sampleLessons.map((title) => ({ title, section, slides: [], links: [] }))
-      : [`${section}: Part 1`, `${section}: Part 2`, `${section}: Practice`].map(
-          (title) => ({ title, section, slides: [], links: [] }),
-        );
-  };
+  const lessonsForSection = (section: string) =>
+    lessonContent.filter((lesson) => lesson.section === section);
   return (
     <>
       <PublicHeader />
@@ -818,13 +799,11 @@ function CourseDetails({ course }: { course: Course }) {
                   </button>
                   {open === index && (
                     <div className="lesson-list">
-                      {lessonsForSection(section, index).map((lesson) => {
-                        const lessonIndex = lessonContent.findIndex(
-                          (savedLesson) => savedLesson.title === lesson.title,
-                        );
+                      {lessonsForSection(section).length === 0 && <p>Lessons coming soon.</p>}
+                      {lessonsForSection(section).map((lesson) => {
                         return (
                         <button
-                          onClick={() => go("lesson", course, lessonIndex >= 0 ? lessonIndex : 0)}
+                          onClick={() => go("lesson", course, lessonContent.indexOf(lesson))}
                           key={lesson.title}
                         >
                           <Icon
@@ -1287,41 +1266,42 @@ export default function App() {
     };
   }, []);
 
-  const saveCourse = (course: Course) => {
-    const existingIndex = editingCourse
-      ? courses.findIndex((item) => item.title === editingCourse.title)
-      : -1;
-    const nextCourses =
-      existingIndex >= 0
-        ? courses.map((item, index) => (index === existingIndex ? course : item))
-        : [...courses, course];
+  const saveCourse = async (course: Course) => {
+    // The builder has no publish step yet, so saving must keep a course visible to learners.
+    const savedCourse = editingCourse?.id
+      ? await updateCourse({
+          ...course,
+          id: editingCourse.id,
+          status: editingCourse.status ?? "published",
+        })
+      : await createCourse({ ...course, status: "published" });
 
-    try {
-      window.localStorage.setItem("elite-rc-courses", JSON.stringify(nextCourses));
-    } catch (error) {
-      console.error("Unable to save course locally.", error);
-      return false;
-    }
-
-    courses = nextCourses;
-    setSelectedCourse(course);
+    courses = editingCourse?.id
+      ? courses.map((item) => (item.id === savedCourse.id ? savedCourse : item))
+      : [...courses, savedCourse];
+    setSelectedCourse(savedCourse);
     setEditingCourse(undefined);
     refreshCourses((version) => version + 1);
     setPage("admin");
     window.scrollTo({ top: 0, behavior: "smooth" });
-    return true;
   };
-  const deleteCourse = (course: Course) => {
+  const deleteCourse = async (course: Course) => {
     if (!window.confirm(`Delete "${course.title}"? This cannot be undone.`)) return;
-    courses = courses.filter((item) => item.title !== course.title);
-    window.localStorage.setItem("elite-rc-courses", JSON.stringify(courses));
+    try {
+      await removeCourse(course);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The course could not be deleted.");
+      return;
+    }
+    courses = courses.filter((item) => item.id !== course.id);
+    if (selectedCourse.id === course.id && courses.length > 0) setSelectedCourse(courses[0]);
     refreshCourses((version) => version + 1);
     setPage("admin");
   };
   navigate = (nextPage, course, lessonIndex) => {
     if (course) setSelectedCourse(course);
     setEditingCourse(nextPage === "builder" ? course : undefined);
-    if (lessonIndex !== undefined) setSelectedLessonIndex(Math.max(0, lessonIndex));
+    setSelectedLessonIndex(Math.max(0, lessonIndex ?? 0));
     setPage(nextPage);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -1355,7 +1335,8 @@ export default function App() {
       </main>
     );
   }
-  if (courses.length === 0) {
+  // Staff pages stay open with an empty library so the first course can be added.
+  if (courses.length === 0 && !["admin", "builder", "instructor", "auth"].includes(page)) {
     return (
       <main className="auth">
         <section>
@@ -1363,8 +1344,9 @@ export default function App() {
           <div>
             <span className="eyebrow light">COURSE LIBRARY</span>
             <h1>No published courses yet.</h1>
-            <p>Publish a course in Supabase, then refresh this page.</p>
-            <Button onClick={() => window.location.reload()}>Refresh</Button>
+            <p>Staff can add the first course from the staff workspace.</p>
+            <Button onClick={() => setPage("auth")}>Staff sign in</Button>
+            <Button variant="outline" onClick={() => window.location.reload()}>Refresh</Button>
           </div>
         </section>
       </main>
@@ -1391,6 +1373,7 @@ export default function App() {
     />
   ) : page === "builder" ? (
     <CourseBuilderPage
+      key={editingCourse?.id ?? "new-course"}
       courses={courses}
       onNavigate={(nextPage, course) => go(nextPage, course)}
       onSaveCourse={saveCourse}
