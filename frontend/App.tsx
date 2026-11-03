@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { User } from "@supabase/supabase-js";
 import {
   InstructorWorkspace,
   StaffCoursePreview,
@@ -6,10 +7,17 @@ import {
 } from "./features/staff/StaffPages";
 import { CourseBuilderPage } from "./features/staff/CourseBuilderPage";
 import type { CourseResource, StaffCourse } from "./features/staff/StaffPages";
-import { API_URL, createCourse, removeCourse, updateCourse } from "./features/staff/courseApi";
+import {
+  API_URL,
+  createCourse,
+  removeCourse,
+  updateCourse,
+} from "./features/staff/courseApi";
+import { supabase } from "./supabaseClient";
 
 type Page =
   | "home"
+  | "about"
   | "explore"
   | "course"
   | "dashboard"
@@ -20,6 +28,7 @@ type Page =
   | "preview"
   | "instructor"
   | "auth"
+  | "reset-password"
   | "profile";
 type IconName =
   | "plane"
@@ -355,15 +364,21 @@ function Button({
   icon,
   onClick,
   className = "",
+  disabled = false,
 }: {
   children: ReactNode;
   variant?: "primary" | "outline" | "ghost" | "danger";
   icon?: IconName;
   onClick?: () => void;
   className?: string;
+  disabled?: boolean;
 }) {
   return (
-    <button className={`btn ${variant} ${className}`} onClick={onClick}>
+    <button
+      className={`btn ${variant} ${className}`}
+      onClick={onClick}
+      disabled={disabled}
+    >
       {icon && <Icon name={icon} size={17} />}
       <span>{children}</span>
     </button>
@@ -390,16 +405,34 @@ function Logo({ dark = false }: { dark?: boolean }) {
 type Course = StaffCourse;
 type LessonSelection = { course: Course; lessonIndex: number };
 
+function memberName(user: User) {
+  return String(
+    user.user_metadata?.full_name || user.email?.split("@")[0] || "Member",
+  );
+}
+
+function memberInitials(user: User) {
+  return memberName(user)
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join("");
+}
+
 let courses: Course[] = initialCourses;
 
 function getFeaturedCourses() {
   const createdCourses = courses.filter(
-    (course) => !initialCourses.some((initial) => initial.title === course.title),
+    (course) =>
+      !initialCourses.some((initial) => initial.title === course.title),
   );
-  return [...createdCourses, ...courses].filter(
-    (course, index, list) =>
-      list.findIndex((item) => item.title === course.title) === index,
-  ).slice(0, 3);
+  return [...createdCourses, ...courses]
+    .filter(
+      (course, index, list) =>
+        list.findIndex((item) => item.title === course.title) === index,
+    )
+    .slice(0, 3);
 }
 
 function asResource(resource: CourseResource | string): CourseResource {
@@ -411,16 +444,29 @@ function asResource(resource: CourseResource | string): CourseResource {
 function normalizeLink(value: string) {
   const trimmed = value.trim();
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^https?\/\//i.test(trimmed)) return trimmed.replace(/^https?/i, "https:");
+  if (/^https?\/\//i.test(trimmed))
+    return trimmed.replace(/^https?/i, "https:");
   return `https://${trimmed}`;
 }
 
-let navigate: (page: Page, course?: Course, lessonIndex?: number) => void = () => {};
+let navigate: (
+  page: Page,
+  course?: Course,
+  lessonIndex?: number,
+) => void = () => {};
 function go(page: Page, course?: Course, lessonIndex?: number) {
   navigate(page, course, lessonIndex);
 }
 
-function PublicHeader({ active }: { active?: Page }) {
+function PublicHeader({
+  active,
+  user,
+  onSignOut,
+}: {
+  active?: Page;
+  user?: User | null;
+  onSignOut?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <header className="public-header">
@@ -438,10 +484,24 @@ function PublicHeader({ active }: { active?: Page }) {
         >
           Explore Courses
         </button>
-        <button onClick={() => go("home")}>About Us</button>
-        <Button variant="outline" onClick={() => go("auth")}>
-          Sign In
-        </Button>
+        {user && (
+          <button onClick={() => go("dashboard")}>Student Space</button>
+        )}
+        <button
+          className={active === "about" ? "active" : ""}
+          onClick={() => go("about")}
+        >
+          About Us
+        </button>
+        {user && onSignOut ? (
+          <Button variant="outline" onClick={onSignOut}>
+            Sign Out
+          </Button>
+        ) : (
+          <Button variant="outline" onClick={() => go("auth")}>
+            Sign In
+          </Button>
+        )}
       </nav>
       <button className="menu-btn" onClick={() => setOpen(!open)}>
         <Icon name={open ? "close" : "menu"} />
@@ -479,7 +539,13 @@ function CourseCard({ course, index = 0 }: { course: Course; index?: number }) {
   );
 }
 
-function Home() {
+function Home({
+  user,
+  onSignOut,
+}: {
+  user?: User | null;
+  onSignOut?: () => void;
+}) {
   const cats: [IconName, string, string][] = [
     ["plane", "RC Planes", "Aerodynamics & flight"],
     ["car", "RC Cars", "Speed & control"],
@@ -490,7 +556,7 @@ function Home() {
   ];
   return (
     <>
-      <PublicHeader active="home" />
+      <PublicHeader active="home" user={user} onSignOut={onSignOut} />
       <main className="public-main">
         <section className="hero">
           <div className="hero-copy">
@@ -634,7 +700,13 @@ function Footer() {
   );
 }
 
-function Explore() {
+function Explore({
+  user,
+  onSignOut,
+}: {
+  user?: User | null;
+  onSignOut?: () => void;
+}) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("All");
   const [difficulty, setDifficulty] = useState("All levels");
@@ -652,7 +724,7 @@ function Explore() {
   );
   return (
     <>
-      <PublicHeader active="explore" />
+      <PublicHeader active="explore" user={user} onSignOut={onSignOut} />
       <main className="catalog">
         <div className="catalog-head">
           <span className="eyebrow">COURSE LIBRARY</span>
@@ -727,14 +799,73 @@ function Explore() {
   );
 }
 
-function CourseDetails({ course }: { course: Course }) {
+function About({ user, onSignOut }: { user?: User | null; onSignOut?: () => void }) {
+  return (
+    <>
+      <PublicHeader active="about" user={user} onSignOut={onSignOut} />
+      <main className="public-main">
+        <section className="hero about-hero">
+          <div className="hero-copy">
+            <span className="eyebrow">ABOUT ELITE RC</span>
+            <h1>Practical engineering, made accessible.</h1>
+            <p>
+              Elite RC helps curious builders learn by doing, with clear lessons
+              for aircraft, vehicles, electronics, and connected projects.
+            </p>
+          </div>
+          <div className="hero-media">
+            <img src={hero} alt="A radio controlled aircraft in flight" />
+          </div>
+        </section>
+        <section className="why">
+          <div>
+            <span className="eyebrow">HOW WE TEACH</span>
+            <h2>Build confidence through real projects.</h2>
+            <p>
+              Every learning path breaks complex systems into useful steps, so
+              members can understand the principles and apply them in the workshop.
+            </p>
+          </div>
+          <div className="why-grid">
+            <article>
+              <span>01</span>
+              <h3>Learn clearly</h3>
+              <p>Focused explanations and practical resources keep every lesson moving.</p>
+            </article>
+            <article>
+              <span>02</span>
+              <h3>Build bravely</h3>
+              <p>Hands-on projects turn theory into skills you can use and share.</p>
+            </article>
+            <article>
+              <span>03</span>
+              <h3>Grow together</h3>
+              <p>A shared course library gives builders a place to keep progressing.</p>
+            </article>
+          </div>
+        </section>
+      </main>
+      <Footer />
+    </>
+  );
+}
+
+function CourseDetails({
+  course,
+  user,
+  onSignOut,
+}: {
+  course: Course;
+  user?: User | null;
+  onSignOut?: () => void;
+}) {
   const [open, setOpen] = useState(0);
   const lessonContent = course.lessonContent ?? [];
   const lessonsForSection = (section: string) =>
     lessonContent.filter((lesson) => lesson.section === section);
   return (
     <>
-      <PublicHeader />
+      <PublicHeader user={user} onSignOut={onSignOut} />
       <main className="details">
         <button className="crumb" onClick={() => go("explore")}>
           Explore Courses / {course.category} / <b>{course.title}</b>
@@ -748,7 +879,10 @@ function CourseDetails({ course }: { course: Course }) {
             <p>{course.desc}</p>
             <div className="instructor">
               <img
-                src={course.instructorImage || "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80"}
+                src={
+                  course.instructorImage ||
+                  "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80"
+                }
                 alt={course.instructor}
                 className="instructor-avatar"
               />
@@ -799,23 +933,28 @@ function CourseDetails({ course }: { course: Course }) {
                   </button>
                   {open === index && (
                     <div className="lesson-list">
-                      {lessonsForSection(section).length === 0 && <p>Lessons coming soon.</p>}
+                      {lessonsForSection(section).length === 0 && (
+                        <p>Lessons coming soon.</p>
+                      )}
                       {lessonsForSection(section).map((lesson) => {
                         return (
-                        <button
-                          onClick={() => go("lesson", course, lessonContent.indexOf(lesson))}
-                          key={lesson.title}
-                        >
-                          <Icon
-                            name="play"
-                            size={17}
-                          />
-                          <span>
-                            {lesson.title}
-                            <small>OPEN LESSON</small>
-                          </span>
-                          <em>Open</em>
-                        </button>
+                          <button
+                            onClick={() =>
+                              go(
+                                "lesson",
+                                course,
+                                lessonContent.indexOf(lesson),
+                              )
+                            }
+                            key={lesson.title}
+                          >
+                            <Icon name="play" size={17} />
+                            <span>
+                              {lesson.title}
+                              <small>OPEN LESSON</small>
+                            </span>
+                            <em>Open</em>
+                          </button>
                         );
                       })}
                     </div>
@@ -870,18 +1009,20 @@ const studentNav: [Page, IconName, string][] = [
 function AppShell({
   children,
   active,
+  user,
+  onSignOut,
 }: {
   children: ReactNode;
   active: Page;
+  user: User;
+  onSignOut: () => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="app-shell">
       <aside className={`side ${open ? "open" : ""}`}>
         <Logo />
-        <div className="side-label">
-          STUDENT SPACE
-        </div>
+        <div className="side-label">STUDENT SPACE</div>
         <nav>
           {studentNav.map(([page, icon, label]) => (
             <button
@@ -898,10 +1039,10 @@ function AppShell({
           ))}
         </nav>
         <div className="side-user">
-          <span>AK</span>
+          <span>{memberInitials(user)}</span>
           <div>
-            <b>Alex Kofi</b>
-            <small>Student · Level 2</small>
+            <b>{memberName(user)}</b>
+            <small>Member</small>
           </div>
         </div>
       </aside>
@@ -915,7 +1056,7 @@ function AppShell({
             All systems operational
           </div>
           <button className="top-profile" onClick={() => go("profile")}>
-            <span>AK</span>
+            <span>{memberInitials(user)}</span>
             <Icon name="chevron" size={16} />
           </button>
         </header>
@@ -925,18 +1066,15 @@ function AppShell({
   );
 }
 
-function Dashboard() {
+function Dashboard({ user, onSignOut }: { user: User; onSignOut: () => void }) {
   return (
-    <AppShell active="dashboard">
+    <AppShell active="dashboard" user={user} onSignOut={onSignOut}>
       <div className="page-title">
         <div>
           <span className="eyebrow">YOUR LEARNING</span>
-          <h1>Welcome back, Alex.</h1>
+          <h1>Welcome back, {memberName(user)}.</h1>
           <p>You're building real engineering skills—one lesson at a time.</p>
         </div>
-        <Button variant="outline" onClick={() => go("explore")}>
-          Explore courses
-        </Button>
       </div>
       <section className="continue-card">
         <img src={courses[0].image} alt="RC plane course" />
@@ -961,12 +1099,23 @@ function Dashboard() {
       </section>
       <section className="panel">
         <div className="panel-head">
-          <h2>Explore more courses</h2>
+          <div>
+            <h2>Learning rhythm</h2>
+            <p>A simple way to keep your workshop practice moving.</p>
+          </div>
+          <span className="badge blue">YOUR FOCUS</span>
         </div>
-        <div className="course-grid">
-          {courses.slice(1, 4).map((course, i) => (
-            <CourseCard key={course.title} course={course} index={i} />
-          ))}
+        <div className="dashboard-overview">
+          <article>
+            <span className="eyebrow">UP NEXT</span>
+            <h3>{courses[0].sampleLessons[2] || "Continue your current lesson"}</h3>
+            <p>Pick up where you left off and turn the next idea into something you can build.</p>
+          </article>
+          <article>
+            <span className="eyebrow">WORKSHOP NOTE</span>
+            <h3>Small sessions add up.</h3>
+            <p>Set aside a little time to review, practice, and return to your project with a clearer eye.</p>
+          </article>
         </div>
       </section>
     </AppShell>
@@ -976,125 +1125,145 @@ function Dashboard() {
 function Lesson({ course, lessonIndex }: LessonSelection) {
   const [started, setStarted] = useState(false);
   const lessonTitle =
-    course.lessonContent?.[lessonIndex]?.title || course.sampleLessons[lessonIndex] || course.sampleLessons[0];
+    course.lessonContent?.[lessonIndex]?.title ||
+    course.sampleLessons[lessonIndex] ||
+    course.sampleLessons[0];
   const lesson = course.lessonContent?.[lessonIndex];
   return (
     <div className="lesson-shell">
       <header className="lesson-top">
         <Logo dark />
-            <button className="crumb" onClick={() => go("course", course)}>
-              {course.title}
-            </button>
-            <span>Lesson {lessonIndex + 1} of {course.lessons}</span>
+        <button className="crumb" onClick={() => go("course", course)}>
+          {course.title}
+        </button>
+        <span>
+          Lesson {lessonIndex + 1} of {course.lessons}
+        </span>
       </header>
       <main className="lesson-content">
-            <span className="eyebrow">
-              {course.category.toUpperCase()} · {started ? `LESSON ${lessonIndex + 1}` : "OVERVIEW"}
-            </span>
-            <h1>{started ? lessonTitle : `Welcome to ${course.title}`}</h1>
-            <p className="lead">
-              {started
-                ? `Work through this lesson in ${course.title.toLowerCase()} and use the attached resources as you build.`
-                : `Start building your foundation with this practical introduction to ${course.title.toLowerCase()}.`}
-            </p>
-            <article className="content-card">
-              {started ? (
-                <>
-                  <h2>{lesson?.title || lessonTitle}</h2>
-                  <p>
-                    This lesson is part of the {lesson?.section || "course curriculum"} section.
-                  </p>
-                  {lesson?.slides.length ? (
-                    <div className="lesson-resource">
-                      <b>Slides</b>
-                      {lesson.slides.map((slide) => {
-                        const resource = asResource(slide);
-                        return (
-                        <a href={resource.url} download={resource.name} target="_blank" rel="noreferrer" key={resource.name}>
-                          {resource.name} · Open slides
-                        </a>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                  {lesson?.video ? (
-                    <div className="lesson-resource">
-                      <b>Short video preview</b>
-                      {typeof lesson.video === "string" ? (
-                        <a href={lesson.video} target="_blank" rel="noreferrer">
-                          Open preview clip
-                        </a>
-                      ) : (
-                        <video controls preload="metadata" src={lesson.video.url}>
-                          Your browser does not support video playback.
-                        </video>
-                      )}
-                      {lesson.youtubeUrl && (
-                        <a
-                          className="full-video-link"
-                          href={normalizeLink(lesson.youtubeUrl)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Watch the full video on YouTube
-                        </a>
-                      )}
-                    </div>
-                  ) : null}
-                  {!lesson?.video && lesson?.youtubeUrl ? (
-                    <div className="lesson-resource">
-                      <b>Full lesson video</b>
+        <span className="eyebrow">
+          {course.category.toUpperCase()} ·{" "}
+          {started ? `LESSON ${lessonIndex + 1}` : "OVERVIEW"}
+        </span>
+        <h1>{started ? lessonTitle : `Welcome to ${course.title}`}</h1>
+        <p className="lead">
+          {started
+            ? `Work through this lesson in ${course.title.toLowerCase()} and use the attached resources as you build.`
+            : `Start building your foundation with this practical introduction to ${course.title.toLowerCase()}.`}
+        </p>
+        <article className="content-card">
+          {started ? (
+            <>
+              <h2>{lesson?.title || lessonTitle}</h2>
+              <p>
+                This lesson is part of the{" "}
+                {lesson?.section || "course curriculum"} section.
+              </p>
+              {lesson?.slides.length ? (
+                <div className="lesson-resource">
+                  <b>Slides</b>
+                  {lesson.slides.map((slide) => {
+                    const resource = asResource(slide);
+                    return (
                       <a
-                        className="full-video-link"
-                        href={normalizeLink(lesson.youtubeUrl)}
+                        href={resource.url}
+                        download={resource.name}
                         target="_blank"
                         rel="noreferrer"
+                        key={resource.name}
                       >
-                        Watch the full video on YouTube
+                        {resource.name} · Open slides
                       </a>
-                    </div>
-                  ) : null}
-                  {!lesson && <p>Lesson resources will be added by the instructor.</p>}
-                </>
-              ) : (
-                <>
-                  <h2>Lesson overview</h2>
-                  <p>
-                    In this lesson, you will learn the essential ideas, equipment,
-                    and safety practices needed to continue confidently through
-                    the course.
+                    );
+                  })}
+                </div>
+              ) : null}
+              {lesson?.video ? (
+                <div className="lesson-resource">
+                  <b>Short video preview</b>
+                  {typeof lesson.video === "string" ? (
+                    <a href={lesson.video} target="_blank" rel="noreferrer">
+                      Open preview clip
+                    </a>
+                  ) : (
+                    <video controls preload="metadata" src={lesson.video.url}>
+                      Your browser does not support video playback.
+                    </video>
+                  )}
+                  {lesson.youtubeUrl && (
+                    <a
+                      className="full-video-link"
+                      href={normalizeLink(lesson.youtubeUrl)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Watch the full video on YouTube
+                    </a>
+                  )}
+                </div>
+              ) : null}
+              {!lesson?.video && lesson?.youtubeUrl ? (
+                <div className="lesson-resource">
+                  <b>Full lesson video</b>
+                  <a
+                    className="full-video-link"
+                    href={normalizeLink(lesson.youtubeUrl)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Watch the full video on YouTube
+                  </a>
+                </div>
+              ) : null}
+              {!lesson && (
+                <p>Lesson resources will be added by the instructor.</p>
+              )}
+            </>
+          ) : (
+            <>
+              <h2>Lesson overview</h2>
+              <p>
+                In this lesson, you will learn the essential ideas, equipment,
+                and safety practices needed to continue confidently through the
+                course.
+              </p>
+              <div className="objectives">
+                {course.objectives.slice(0, 3).map((objective) => (
+                  <p key={objective}>
+                    <i>
+                      <Icon name="check" size={15} />
+                    </i>
+                    {objective}
                   </p>
-                  <div className="objectives">
-                    {course.objectives.slice(0, 3).map((objective) => (
-                      <p key={objective}>
-                        <i>
-                          <Icon name="check" size={15} />
-                        </i>
-                        {objective}
-                      </p>
-                    ))}
-                  </div>
-                </>
-              )}
-            </article>
-            <div className="lesson-nav">
-              <Button variant="outline" onClick={() => go("course", course)}>
-                Back to course
-              </Button>
-              {!started && (
-                <Button onClick={() => setStarted(true)}>
-                  Start lesson <Icon name="arrow" />
-                </Button>
-              )}
-            </div>
+                ))}
+              </div>
+            </>
+          )}
+        </article>
+        <div className="lesson-nav">
+          <Button variant="outline" onClick={() => go("course", course)}>
+            Back to course
+          </Button>
+          {!started && (
+            <Button onClick={() => setStarted(true)}>
+              Start lesson <Icon name="arrow" />
+            </Button>
+          )}
+        </div>
       </main>
     </div>
   );
 }
 
-function ProgressPage() {
+function ProgressPage({
+  user,
+  onSignOut,
+}: {
+  user: User;
+  onSignOut: () => void;
+}) {
   return (
-    <AppShell active="progress">
+    <AppShell active="progress" user={user} onSignOut={onSignOut}>
       <div className="page-title">
         <div>
           <span className="eyebrow">YOUR LEARNING</span>
@@ -1126,6 +1295,74 @@ function ProgressPage() {
 
 function Auth() {
   const [register, setRegister] = useState(false);
+  const [forgotPassword, setForgotPassword] = useState(false);
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [resetCooldown, setResetCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resetCooldown === 0) return;
+    const timer = window.setInterval(() => {
+      setResetCooldown((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [resetCooldown]);
+
+  const submit = async () => {
+    setError("");
+    setMessage("");
+    setSubmitting(true);
+    try {
+      if (forgotPassword) {
+        if (resetCooldown > 0) return;
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+          email.trim(),
+          { redirectTo: window.location.origin },
+        );
+        if (resetError) throw resetError;
+        setMessage("Check your email for a password reset link. If you don't see it, check your spam folder.");
+        setResetCooldown(30);
+        return;
+      }
+      const result = register
+        ? await supabase.auth.signUp({
+            email: email.trim(),
+            password,
+            options: { data: { full_name: fullName.trim() } },
+          })
+        : await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password,
+          });
+      if (result.error) throw result.error;
+      if (result.data.session) {
+        go("dashboard");
+      } else {
+        setMessage(
+          "Account created. Check your email to confirm your account, then sign in.",
+        );
+        setRegister(false);
+      }
+    } catch (authError) {
+      const errorMessage =
+        authError instanceof Error
+          ? authError.message
+          : "Authentication failed. Please try again.";
+      if (forgotPassword && /rate limit|too many requests/i.test(errorMessage)) {
+        setResetCooldown(60);
+        setError("Supabase has temporarily limited reset emails. Wait a few minutes before trying again.");
+      } else {
+        setError(errorMessage);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="auth">
       <section>
@@ -1146,37 +1383,100 @@ function Auth() {
         </button>
         <div className="auth-card">
           <span className="eyebrow">
-            {register ? "JOIN THE COMMUNITY" : "WELCOME BACK"}
+            {forgotPassword
+              ? "RESET YOUR PASSWORD"
+              : register
+                ? "JOIN THE COMMUNITY"
+                : "WELCOME BACK"}
           </span>
-          <h2>{register ? "Create your account" : "Sign in to continue"}</h2>
-          <p>Authentication will be connected in the backend phase.</p>
-          {register && (
+          <h2>
+            {forgotPassword
+              ? "Forgot your password?"
+              : register
+                ? "Create your account"
+                : "Sign in to continue"}
+          </h2>
+          <p>
+            {forgotPassword
+              ? "Enter your email and we will send you a secure reset link."
+              : "Use your member account to continue learning."}
+          </p>
+          {register && !forgotPassword && (
             <label>
               Full name
-              <input placeholder="Your name" />
+              <input
+                value={fullName}
+                onChange={(event) => setFullName(event.target.value)}
+                placeholder="Your name"
+              />
             </label>
           )}
           <label>
             Email address
-            <input type="email" placeholder="you@example.com" />
+            <input
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              type="email"
+              placeholder="you@example.com"
+              required
+            />
           </label>
-          <label>
+          {!forgotPassword && <label>
             Password
-            <input type="password" placeholder="At least 8 characters" />
-          </label>
-          <Button className="wide" onClick={() => go("dashboard")}>
-            {register ? "Create account" : "Sign in"}
-          </Button>
+            <input
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              type="password"
+              placeholder="At least 8 characters"
+              minLength={6}
+              required
+            />
+          </label>}
+          {error && (
+            <p role="alert" className="form-error">
+              {error}
+            </p>
+          )}
+          {message && <p role="status">{message}</p>}
           <Button
-            variant="outline"
             className="wide"
-            onClick={() => go("instructor")}
+            onClick={() => void submit()}
+            disabled={forgotPassword && resetCooldown > 0}
           >
-            Enter Instructor Workspace
+            {forgotPassword
+              ? resetCooldown > 0
+                ? `Send again in ${resetCooldown}s`
+                : "Send reset link"
+              : register
+                ? "Create account"
+                : "Sign in"}
           </Button>
+          {!register && !forgotPassword && (
+            <button
+              className="forgot"
+              onClick={() => {
+                setError("");
+                setMessage("");
+                setForgotPassword(true);
+              }}
+            >
+              Forgot password?
+            </button>
+          )}
           <p className="switch">
-            <button onClick={() => setRegister(!register)}>
-              {register ? "Sign in" : "Create an account"}
+            <button
+              onClick={() => {
+                setError("");
+                setMessage("");
+                setForgotPassword(false);
+                setRegister(!register);
+              }}
+            >
+              {forgotPassword
+                ? "Back to sign in"
+                : register
+                  ? "Sign in"
+                  : "Create an account"}
             </button>
           </p>
         </div>
@@ -1185,9 +1485,91 @@ function Auth() {
   );
 }
 
-function ProfilePage() {
+function ResetPassword() {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const updatePassword = async () => {
+    setError("");
+    setMessage("");
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+    if (password !== confirmation) {
+      setError("Passwords do not match.");
+      return;
+    }
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+    setMessage("Your password has been updated successfully. You can now log in with your new password.");
+  };
+
   return (
-    <AppShell active="profile">
+    <div className="auth">
+      <section>
+        <Logo />
+        <div>
+          <span className="eyebrow light">WELCOME BACK</span>
+          <h1>Keep building.</h1>
+          <p>Set a new password and return to your learning space.</p>
+        </div>
+        <small>ELITE RC COMMUNITY</small>
+      </section>
+      <main>
+        <div className="auth-card">
+          <span className="eyebrow">NEW PASSWORD</span>
+          <h2>Choose a new password</h2>
+          <p>Use at least 6 characters for your new password.</p>
+          <label>
+            New password
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              minLength={6}
+            />
+          </label>
+          <label>
+            Confirm password
+            <input
+              type="password"
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+              minLength={6}
+            />
+          </label>
+          {error && <p role="alert" className="form-error">{error}</p>}
+          {message && <p role="status">{message}</p>}
+          {!message ? (
+            <Button className="wide" onClick={() => void updatePassword()}>
+              Update password
+            </Button>
+          ) : (
+            <Button className="wide" onClick={() => go("dashboard")}>
+              Continue learning
+            </Button>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function ProfilePage({
+  user,
+  onSignOut,
+}: {
+  user: User;
+  onSignOut: () => void;
+}) {
+  return (
+    <AppShell active="profile" user={user} onSignOut={onSignOut}>
       <div className="page-title">
         <div>
           <span className="eyebrow">ACCOUNT</span>
@@ -1198,22 +1580,22 @@ function ProfilePage() {
       <section className="panel profile-panel">
         <div className="profile-cover" />
         <div className="profile-main">
-          <span className="profile-avatar">AK</span>
+          <span className="profile-avatar">{memberInitials(user)}</span>
           <div>
-            <h2>Alex Kofi</h2>
+            <h2>{memberName(user)}</h2>
             <p>Student builder</p>
           </div>
         </div>
         <div className="profile-form">
           <label>
             Full name
-            <input defaultValue="Alex Kofi" />
+            <input defaultValue={memberName(user)} readOnly />
           </label>
           <label>
             Email address
-            <input defaultValue="alex.kofi@example.com" />
+            <input defaultValue={user.email || ""} readOnly />
           </label>
-          <Button>Save changes</Button>
+          <Button onClick={onSignOut}>Sign out</Button>
         </div>
       </section>
     </AppShell>
@@ -1224,10 +1606,34 @@ export default function App() {
   const [page, setPage] = useState<Page>("home");
   const [selectedCourse, setSelectedCourse] = useState<Course>(courses[0]);
   const [selectedLessonIndex, setSelectedLessonIndex] = useState(0);
+  const [user, setUser] = useState<User | null>(null);
   const [editingCourse, setEditingCourse] = useState<Course>();
   const [courseVersion, refreshCourses] = useState(0);
-  const [courseLoadState, setCourseLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [courseLoadState, setCourseLoadState] = useState<
+    "loading" | "ready" | "error"
+  >("loading");
   const [courseLoadError, setCourseLoadError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (active) setUser(data.session?.user ?? null);
+    });
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (active) setUser(session?.user ?? null);
+      if (active && event === "PASSWORD_RECOVERY") setPage("reset-password");
+    });
+    return () => {
+      active = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setPage("home");
+  };
 
   useEffect(() => {
     let active = true;
@@ -1286,15 +1692,21 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const deleteCourse = async (course: Course) => {
-    if (!window.confirm(`Delete "${course.title}"? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete "${course.title}"? This cannot be undone.`))
+      return;
     try {
       await removeCourse(course);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "The course could not be deleted.");
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "The course could not be deleted.",
+      );
       return;
     }
     courses = courses.filter((item) => item.id !== course.id);
-    if (selectedCourse.id === course.id && courses.length > 0) setSelectedCourse(courses[0]);
+    if (selectedCourse.id === course.id && courses.length > 0)
+      setSelectedCourse(courses[0]);
     refreshCourses((version) => version + 1);
     setPage("admin");
   };
@@ -1336,7 +1748,10 @@ export default function App() {
     );
   }
   // Staff pages stay open with an empty library so the first course can be added.
-  if (courses.length === 0 && !["admin", "builder", "instructor", "auth"].includes(page)) {
+  if (
+    courses.length === 0 &&
+    !["admin", "builder", "instructor", "auth", "reset-password"].includes(page)
+  ) {
     return (
       <main className="auth">
         <section>
@@ -1346,24 +1761,36 @@ export default function App() {
             <h1>No published courses yet.</h1>
             <p>Staff can add the first course from the staff workspace.</p>
             <Button onClick={() => setPage("auth")}>Staff sign in</Button>
-            <Button variant="outline" onClick={() => window.location.reload()}>Refresh</Button>
+            <Button variant="outline" onClick={() => window.location.reload()}>
+              Refresh
+            </Button>
           </div>
         </section>
       </main>
     );
   }
   return page === "home" ? (
-    <Home />
+    <Home user={user} onSignOut={signOut} />
+  ) : page === "about" ? (
+    <About user={user} onSignOut={signOut} />
   ) : page === "explore" ? (
-    <Explore />
+    <Explore user={user} onSignOut={signOut} />
   ) : page === "course" ? (
-    <CourseDetails course={selectedCourse} />
+    <CourseDetails course={selectedCourse} user={user} onSignOut={signOut} />
   ) : page === "dashboard" ? (
-    <Dashboard />
+    user ? (
+      <Dashboard user={user} onSignOut={signOut} />
+    ) : (
+      <Auth />
+    )
   ) : page === "lesson" ? (
     <Lesson course={selectedCourse} lessonIndex={selectedLessonIndex} />
   ) : page === "progress" ? (
-    <ProgressPage />
+    user ? (
+      <ProgressPage user={user} onSignOut={signOut} />
+    ) : (
+      <Auth />
+    )
   ) : page === "admin" ? (
     <StaffOverview
       courses={courses}
@@ -1394,7 +1821,11 @@ export default function App() {
     />
   ) : page === "auth" ? (
     <Auth />
+  ) : page === "reset-password" ? (
+    <ResetPassword />
+  ) : user ? (
+    <ProfilePage user={user} onSignOut={signOut} />
   ) : (
-    <ProfilePage />
+    <Auth />
   );
 }
