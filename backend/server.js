@@ -109,6 +109,37 @@ function requireSupabaseAdmin(res) {
   return true;
 }
 
+// Staff are marked in app_metadata, which only the service key can change.
+// user_metadata is not used because members can write anything into it.
+function isStaff(user) {
+  return user?.app_metadata?.role === "staff";
+}
+
+async function requireStaff(req, res, next) {
+  if (!requireSupabase(res)) return;
+  const token = /^Bearer (.+)$/.exec(req.get("authorization") || "")?.[1];
+  if (!token) {
+    res.status(401).json({ error: "Sign in with a staff account to change courses." });
+    return;
+  }
+  const { data, error } = await supabase.auth.getUser(token);
+  // Supabase answers 4xx for a bad sign-in; anything else means it could not check.
+  if (error && !(error.status >= 400 && error.status < 500)) {
+    res.status(503).json({ error: "We could not check your sign-in. Please try again in a moment." });
+    return;
+  }
+  if (error || !data?.user) {
+    res.status(401).json({ error: "Your sign-in has expired. Sign in again to change courses." });
+    return;
+  }
+  if (!isStaff(data.user)) {
+    res.status(403).json({ error: "Only staff accounts can change courses." });
+    return;
+  }
+  req.user = data.user;
+  next();
+}
+
 function getErrorMessage(error) {
   return error instanceof Error ? error.message : "Unexpected database error.";
 }
@@ -363,7 +394,7 @@ app.get("/api/courses/:id", async (req, res) => {
   }
 });
 
-app.post("/api/courses", async (req, res) => {
+app.post("/api/courses", requireStaff, async (req, res) => {
   if (!requireSupabaseAdmin(res)) return;
   const validationError = validateCourse(req.body);
   if (validationError) {
@@ -373,7 +404,7 @@ app.post("/api/courses", async (req, res) => {
   const input = req.body;
   const { data, error } = await supabaseAdmin
     .from("courses")
-    .insert(toCourseRow(input))
+    .insert({ ...toCourseRow(input), created_by: req.user.id })
     .select("id")
     .single();
   if (error) {
@@ -389,7 +420,7 @@ app.post("/api/courses", async (req, res) => {
   }
 });
 
-app.put("/api/courses/:id", async (req, res) => {
+app.put("/api/courses/:id", requireStaff, async (req, res) => {
   if (!requireSupabaseAdmin(res)) return;
   const validationError = validateCourse(req.body);
   if (validationError) {
@@ -426,7 +457,7 @@ app.put("/api/courses/:id", async (req, res) => {
   }
 });
 
-app.delete("/api/courses/:id", async (req, res) => {
+app.delete("/api/courses/:id", requireStaff, async (req, res) => {
   if (!requireSupabaseAdmin(res)) return;
   const { error } = await supabaseAdmin.from("courses").delete().eq("id", req.params.id);
   if (error) {
@@ -436,7 +467,8 @@ app.delete("/api/courses/:id", async (req, res) => {
   res.status(204).end();
 });
 
-app.post("/api/uploads", express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }), async (req, res) => {
+// Staff are checked before the file is read, so outsiders cannot send large bodies.
+app.post("/api/uploads", requireStaff, express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }), async (req, res) => {
   if (!requireSupabaseAdmin(res)) return;
   const kindName = String(req.query.kind || "");
   if (!Object.hasOwn(uploadKinds, kindName)) {

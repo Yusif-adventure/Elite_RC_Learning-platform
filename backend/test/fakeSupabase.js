@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 // never touch a real database. It speaks the same HTTP API as Supabase and
 // applies the same rules as supabase/001_shared_course_data.sql, plus the
 // row-level security seen on the real project: the anon key can read but not write.
+// Supabase Auth only answers "who does this sign-in token belong to?".
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUCKETS = ["course-images", "instructor-images", "lesson-resources"];
@@ -43,17 +44,40 @@ function databaseError(status, code, message) {
   return { status, body: { code, message, details: null, hint: null } };
 }
 
+// Shaped like the user Supabase Auth returns from GET /auth/v1/user.
+function authUser({ id = randomUUID(), email, appMetadata = {}, userMetadata = {} }) {
+  const now = new Date(0).toISOString();
+  return {
+    id,
+    aud: "authenticated",
+    role: "authenticated",
+    email,
+    email_confirmed_at: now,
+    phone: "",
+    confirmed_at: now,
+    last_sign_in_at: now,
+    app_metadata: { provider: "email", providers: ["email"], ...appMetadata },
+    user_metadata: { email, email_verified: true, ...userMetadata },
+    identities: [],
+    created_at: now,
+    updated_at: now,
+    is_anonymous: false,
+  };
+}
+
 export async function startFakeSupabase({ serviceKey }) {
   let db;
   let files;
   let failures;
   let clock;
+  let users;
 
   const reset = () => {
     db = Object.fromEntries(Object.keys(TABLE_RULES).map((table) => [table, []]));
     files = new Map();
     failures = new Set();
     clock = 0;
+    users = new Map();
   };
   reset();
 
@@ -205,6 +229,18 @@ export async function startFakeSupabase({ serviceKey }) {
       const uploadPrefix = "/storage/v1/object/";
       const tablePrefix = "/rest/v1/";
 
+      if (url.pathname === "/auth/v1/user" && req.method === "GET") {
+        if (failures.delete("auth")) {
+          send({ status: 500, body: { code: 500, error_code: "unexpected_failure", msg: "Simulated auth failure." } });
+          return;
+        }
+        const token = String(req.headers.authorization || "").replace(/^Bearer /, "");
+        const user = users.get(token);
+        send(user
+          ? { status: 200, body: user }
+          : { status: 403, body: { code: 403, error_code: "bad_jwt", msg: "invalid JWT: unable to parse or verify signature" } });
+        return;
+      }
       if (url.pathname.startsWith(publicPrefix)) {
         const file = files.get(decodeURIComponent(url.pathname.slice(publicPrefix.length)));
         if (!file) {
@@ -239,6 +275,12 @@ export async function startFakeSupabase({ serviceKey }) {
     reset,
     close: () => new Promise((resolve) => server.close(resolve)),
     failNext: (target) => failures.add(target),
+    // Signs someone in: the token then identifies them to Supabase Auth.
+    addUser: (token, details) => {
+      const user = authUser(details);
+      users.set(token, user);
+      return user;
+    },
     get db() {
       return db;
     },

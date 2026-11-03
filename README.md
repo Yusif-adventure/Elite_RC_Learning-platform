@@ -16,9 +16,10 @@ The project currently contains:
 - A production frontend build that completes successfully
 
 Courses, lessons, and uploaded files are stored in Supabase and reached through
-the backend, so every browser sees the same courses. Sign-in and staff
-protection are not connected yet, so do not share the backend URL until they
-are.
+the backend, so every browser sees the same courses. Members sign in with
+Supabase Auth. Only staff accounts can create, edit, or delete courses or
+upload files: the backend checks every such request (see
+[Staff access](#staff-access)).
 
 ## Friday shared-pilot release plan
 
@@ -46,13 +47,9 @@ already stable.
 
 ### Current launch blockers
 
-- Courses are stored in browser `localStorage`, so members will not see the
-  same courses across devices.
-- The backend currently provides only health, status, and course-listing
-  endpoints.
-- Sign-in is currently a placeholder and does not authenticate users.
-- Instructor access is currently unrestricted.
 - Production deployment configuration is not complete.
+- Staff accounts must be granted in Supabase before launch (see
+  [Staff access](#staff-access)).
 
 ### Week-of-release focus
 
@@ -131,7 +128,8 @@ next release.
 
 ### Instructor and staff experience
 
-- Enter the Instructor Workspace from the sign-in screen
+- Sign in with a staff account to land in the Staff Workspace, or open it from
+  the **Staff Workspace** link, which only staff see
 - View course assignments and course management screens
 - Create a course with:
   - Course title
@@ -254,6 +252,8 @@ src/
   variable names.
 - [`supabase/001_shared_course_data.sql`](./supabase/001_shared_course_data.sql):
   database tables, seed courses, indexes, and storage buckets.
+- [`supabase/002_staff_access.sql`](./supabase/002_staff_access.sql):
+  row-level security, and how to grant or remove staff access.
 
 ## Running the project
 
@@ -303,10 +303,12 @@ access to the Supabase project, so keep it only in the backend's environment and
 never put it in the frontend, a chat, or Git. Without it, courses can still be
 read, but saving and uploads return a clear error.
 
-The frontend reads shared courses from the backend API. For local development,
-the default API URL is `http://localhost:5000`. To use another backend URL,
-create `frontend/.env` from [`frontend/.env.example`](./frontend/.env.example)
-and set `VITE_API_URL`.
+The frontend needs `frontend/.env`, created from
+[`frontend/.env.example`](./frontend/.env.example), or it will not load. Set
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to the same project URL and
+anon key as the backend, and `VITE_API_URL` to the backend URL
+(`http://localhost:5000` for local development). Never put the service role key
+in the frontend.
 
 The backend exposes:
 
@@ -314,24 +316,60 @@ The backend exposes:
 - `GET /api/status`
 - `GET /api/courses`
 - `GET /api/courses/:id`
-- `POST /api/courses`
-- `PUT /api/courses/:id`
-- `DELETE /api/courses/:id`
-- `POST /api/uploads`
+- `POST /api/courses` (staff only)
+- `PUT /api/courses/:id` (staff only)
+- `DELETE /api/courses/:id` (staff only)
+- `POST /api/uploads` (staff only)
+
+Staff-only endpoints need an `Authorization: Bearer <access token>` header
+from a signed-in Supabase session. The frontend sends it automatically. Without
+a sign-in they answer `401`; with a member's sign-in they answer `403`.
 
 ### Supabase setup
 
 1. Create a Supabase project.
 2. Open the Supabase SQL Editor.
 3. Run [`supabase/001_shared_course_data.sql`](./supabase/001_shared_course_data.sql).
-4. Copy the project URL, anon key, and service role key into `backend/.env`.
-5. Start the backend and verify `GET http://localhost:5000/api/status`.
+4. Run [`supabase/002_staff_access.sql`](./supabase/002_staff_access.sql).
+5. Copy the project URL, anon key, and service role key into `backend/.env`,
+   and the URL and anon key into `frontend/.env`.
+6. Start the backend and verify `GET http://localhost:5000/api/status`.
+7. Make at least one staff account (see [Staff access](#staff-access)).
 
-The migration creates normalized course, objective, section, lesson, and
+The first migration creates normalized course, objective, section, lesson, and
 resource tables. It also seeds two courses and creates public-read storage
-buckets for course images, instructor images, and lesson resources. Upload
-permissions and authenticated write access should be added with the
-authentication work before production release.
+buckets for course images, instructor images, and lesson resources. The second
+turns on row-level security so the anon key, which every browser has, can read
+published courses but cannot change anything.
+
+### Staff access
+
+Staff are marked with `"role": "staff"` in a Supabase user's `app_metadata`.
+Members cannot edit `app_metadata` themselves. (They can edit
+`user_metadata`, so that is never trusted.) For now one staff role covers both
+staff and instructors, and staff can manage every course.
+
+To make someone staff:
+
+1. They sign up in the app with their email address.
+2. In the Supabase SQL Editor, run:
+
+   ```sql
+   update auth.users
+   set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role": "staff"}'::jsonb
+   where email = 'person@example.com';
+   ```
+
+3. They sign out and sign back in. Their browser only learns about the new role
+   on a fresh sign-in, but the backend sees it immediately.
+
+[`supabase/002_staff_access.sql`](./supabase/002_staff_access.sql) also shows
+how to list staff and how to remove staff access.
+
+Hiding the staff pages in the browser is only for clarity. The protection is
+the backend, which checks the sign-in with Supabase before every create, edit,
+delete, or upload, and records which staff member created each course in
+`courses.created_by`.
 
 ## Planned database integration
 
@@ -358,21 +396,16 @@ production use.
 
 ### Authentication and authorization
 
-- Replace the current prototype sign-in screen with real authentication.
-- Add Supabase Auth or another managed authentication provider.
-- Support email/password sign-up and sign-in.
-- Add email verification and password reset.
-- Add sign-out and session persistence.
-- Protect instructor and staff routes from unauthenticated users.
-- Add role-based access control for:
-  - Learners
-  - Instructors
-  - Staff administrators
-- Ensure instructors can edit only courses they own unless they are staff
-  administrators.
-- Ensure only authorized users can upload, update, or delete course content.
-- Add protected backend endpoints that validate the authenticated user rather
-  than trusting data from the browser.
+Done: Supabase email/password sign-up, sign-in, email verification, password
+reset, sign-out, and session persistence; staff-only pages; backend checks that
+only staff can upload, create, update, or delete course content.
+
+Still to do:
+
+- Separate instructor and staff administrator roles, so instructors can edit
+  only courses they own (`courses.created_by` is already recorded).
+- A staff screen for granting staff access, instead of the SQL in
+  [Staff access](#staff-access).
 
 ### Backend and database integration
 
@@ -539,3 +572,21 @@ npm test
 There are currently no repository-level automated frontend tests. The main
 validation is the production build and manual browser testing of the learner
 and staff flows.
+
+On November 3, these were checked in Edge against the real Supabase project, at
+1366px, 390px, and 360px widths:
+
+- Learner path: home, catalog, course page, choosing a lesson in a later
+  section, lesson overview, starting the lesson, slides, video preview, and
+  YouTube link.
+- No page scrolls sideways at any of the three widths.
+- Every course image, instructor photo, slide, video, and YouTube link in the
+  live courses responds.
+- Pages show a placeholder instead of a broken image when an image is missing
+  or its link fails.
+- A member can sign in but sees no staff links, and the backend refuses the
+  member's course changes with `403`.
+- Staff land in the Staff Workspace after signing in, see their own name, and
+  can sign out.
+- Wrong file types, empty files, and oversized files are refused with a clear
+  message, and nothing reaches storage.

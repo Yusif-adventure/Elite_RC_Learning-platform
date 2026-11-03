@@ -11,6 +11,10 @@ import { startFakeSupabase } from "./fakeSupabase.js";
 const SERVER_PATH = fileURLToPath(new URL("../server.js", import.meta.url));
 const SERVICE_KEY = "fake-service-key";
 const MEGABYTE = 1024 * 1024;
+const STAFF_TOKEN = "staff-sign-in";
+const MEMBER_TOKEN = "member-sign-in";
+const SELF_NAMED_STAFF_TOKEN = "self-named-staff-sign-in";
+let staffUser;
 
 let fake;
 const servers = [];
@@ -66,7 +70,24 @@ after(async () => {
   await fake.close();
 });
 
-beforeEach(() => fake.reset());
+beforeEach(() => {
+  fake.reset();
+  // Staff is marked in app_metadata, which only the service key can change.
+  staffUser = fake.addUser(STAFF_TOKEN, {
+    email: "staff@example.com",
+    appMetadata: { role: "staff" },
+  });
+  fake.addUser(MEMBER_TOKEN, { email: "member@example.com" });
+  // Members can write anything into their own user_metadata when they sign up.
+  fake.addUser(SELF_NAMED_STAFF_TOKEN, {
+    email: "sneaky@example.com",
+    userMetadata: { role: "staff" },
+  });
+});
+
+function signedIn(token, headers = {}) {
+  return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
+}
 
 function course(overrides = {}) {
   return {
@@ -95,11 +116,11 @@ function course(overrides = {}) {
   };
 }
 
-function sendCourse(method, path, body) {
-  return fetch(`${api}${path}`, {
+function sendCourse(method, path, body, { token = STAFF_TOKEN, base = api } = {}) {
+  return fetch(`${base}${path}`, {
     method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    headers: signedIn(token, { "Content-Type": "application/json" }),
+    body: body && JSON.stringify(body),
   });
 }
 
@@ -115,11 +136,11 @@ async function readCourse(id) {
   return (await response.json()).course;
 }
 
-function upload(kind, name, size = 10, base = api) {
+function upload(kind, name, size = 10, { token = STAFF_TOKEN, base = api } = {}) {
   const query = new URLSearchParams({ kind, name });
   return fetch(`${base}/api/uploads?${query}`, {
     method: "POST",
-    headers: { "Content-Type": "application/octet-stream" },
+    headers: signedIn(token, { "Content-Type": "application/octet-stream" }),
     body: Buffer.alloc(size, 7),
   });
 }
@@ -338,7 +359,7 @@ test("deleting a course removes it and everything inside it", async () => {
   const created = await createCourse();
   const kept = await createCourse({ title: "Radio Setup" });
 
-  const response = await fetch(`${api}/api/courses/${created.id}`, { method: "DELETE" });
+  const response = await sendCourse("DELETE", `/api/courses/${created.id}`);
 
   assert.equal(response.status, 204);
   const { courses } = await (await fetch(`${api}/api/courses`)).json();
@@ -462,7 +483,7 @@ test("a storage failure returns a clear error and the backend keeps running", as
 test("without the secret key uploads explain the problem and courses can still be read", async () => {
   const created = await createCourse();
 
-  const response = await upload("course-image", "wing.png", 10, apiWithoutServiceKey);
+  const response = await upload("course-image", "wing.png", 10, { base: apiWithoutServiceKey });
   assert.match(await assertJsonError(response, 503), /SUPABASE_SERVICE_ROLE_KEY/);
   assert.equal(fake.files.size, 0);
 
@@ -473,11 +494,7 @@ test("without the secret key uploads explain the problem and courses can still b
 test("without the secret key saving explains the problem and changes nothing", async () => {
   const created = await createCourse();
   const send = (method, path, body) =>
-    fetch(`${apiWithoutServiceKey}${path}`, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: body && JSON.stringify(body),
-    });
+    sendCourse(method, path, body, { base: apiWithoutServiceKey });
 
   const responses = [
     await send("POST", "/api/courses", course({ title: "Radio Setup" })),
@@ -490,4 +507,63 @@ test("without the secret key saving explains the problem and changes nothing", a
   }
   const { courses } = await (await fetch(`${api}/api/courses`)).json();
   assert.deepEqual(courses, [created]);
+});
+
+const outsiders = [
+  ["someone who is not signed in", null, 401],
+  ["someone whose sign-in is expired or made up", "not-a-real-sign-in", 401],
+  ["a signed-in member who is not staff", MEMBER_TOKEN, 403],
+  ["a member who named themselves staff in their own profile", SELF_NAMED_STAFF_TOKEN, 403],
+];
+
+for (const [who, token, status] of outsiders) {
+  test(`${who} cannot create, edit, delete or upload, and nothing changes`, async () => {
+    const created = await createCourse();
+
+    const responses = [
+      await sendCourse("POST", "/api/courses", course({ title: "Radio Setup" }), { token }),
+      await sendCourse("PUT", `/api/courses/${created.id}`, course({ title: "Renamed" }), { token }),
+      await sendCourse("DELETE", `/api/courses/${created.id}`, undefined, { token }),
+      await upload("course-image", "wing.png", 10, { token }),
+    ];
+
+    for (const response of responses) {
+      await assertJsonError(response, status);
+    }
+    assert.equal(fake.db.courses.length, 1);
+    assert.deepEqual(await readCourse(created.id), created);
+    assert.equal(fake.files.size, 0);
+  });
+}
+
+test("a new course records which staff member created it", async () => {
+  const created = await createCourse();
+
+  const [row] = fake.db.courses;
+  assert.equal(row.id, created.id);
+  assert.equal(row.created_by, staffUser.id);
+});
+
+test("editing a course keeps the staff member who created it", async () => {
+  const created = await createCourse();
+  fake.addUser("other-staff-sign-in", {
+    email: "other-staff@example.com",
+    appMetadata: { role: "staff" },
+  });
+
+  const response = await sendCourse("PUT", `/api/courses/${created.id}`, course({ title: "Renamed" }), {
+    token: "other-staff-sign-in",
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(fake.db.courses[0].created_by, staffUser.id);
+});
+
+test("when sign-ins cannot be checked, staff are told to try again rather than to sign in", async () => {
+  fake.failNext("auth");
+
+  const response = await sendCourse("POST", "/api/courses", course());
+
+  assert.match(await assertJsonError(response, 503), /try again/i);
+  assert.equal(fake.db.courses.length, 0);
 });

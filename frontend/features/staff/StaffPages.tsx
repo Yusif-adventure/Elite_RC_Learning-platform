@@ -1,6 +1,16 @@
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
+import { courseImageProps } from "../../imageFallback";
 
 type StaffPage = "admin" | "builder" | "preview" | "instructor";
+
+// The signed-in staff member, shown in the staff sidebar.
+export type StaffAccount = {
+  name: string;
+  initials: string;
+  onViewSite: () => void;
+  onSignOut: () => void;
+};
+export const StaffAccountContext = createContext<StaffAccount | null>(null);
 
 export type CourseResource = {
   name: string;
@@ -67,6 +77,7 @@ export function StaffShell({
   onNavigate: StaffPagesProps["onNavigate"];
 }) {
   const [open, setOpen] = useState(false);
+  const account = useContext(StaffAccountContext);
   const nav: [StaffPage, string, string][] = [
     ["admin", "Overview", "Manage the learning hub"],
     ["instructor", "Instructor workspace", "Create and teach courses"],
@@ -100,13 +111,27 @@ export function StaffShell({
             </button>
           ))}
         </nav>
-        <div className="side-user">
-          <span>AK</span>
-          <div>
-            <b>Ama Kusi</b>
-            <small>Staff administrator</small>
-          </div>
-        </div>
+        {account && (
+          <>
+            <nav className="side-account">
+              <button onClick={account.onViewSite}>
+                <span aria-hidden="true">←</span>
+                View learner site
+              </button>
+              <button onClick={account.onSignOut}>
+                <span aria-hidden="true">⎋</span>
+                Sign out
+              </button>
+            </nav>
+            <div className="side-user">
+              <span>{account.initials}</span>
+              <div>
+                <b>{account.name}</b>
+                <small>Staff</small>
+              </div>
+            </div>
+          </>
+        )}
       </aside>
       <div className="workspace">
         <header className="app-top">
@@ -118,7 +143,7 @@ export function StaffShell({
             Staff tools
           </div>
           <button className="top-profile" onClick={() => onNavigate("admin")}>
-            AK
+            {account?.initials}
           </button>
         </header>
         <main className="workspace-main">{children}</main>
@@ -159,7 +184,7 @@ export function StaffOverview({
         </div>
         {courses.map((course) => (
           <div className="skill-row" key={course.title}>
-            <img src={course.image} alt="" />
+            <img {...courseImageProps(course.image)} alt="" />
             <div>
               <b>{course.title}</b>
               <span>
@@ -224,7 +249,7 @@ export function InstructorWorkspace({
         </div>
         {assignedCourses.map((course) => (
           <div className="skill-row" key={course.title}>
-            <img src={course.image} alt="" />
+            <img {...courseImageProps(course.image)} alt="" />
             <div>
               <b>{course.title}</b>
               <span>
@@ -267,7 +292,7 @@ export function StaffCoursePreview({
         </StaffButton>
       </div>
       <section className="panel preview-panel">
-        <img src={course.image} alt="" />
+        <img {...courseImageProps(course.image)} alt="" />
         <div>
           <span className="badge">{course.level}</span>
           <h2>{course.title}</h2>

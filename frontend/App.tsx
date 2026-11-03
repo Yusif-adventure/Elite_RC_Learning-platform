@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { courseImageProps, personImageProps } from "./imageFallback";
 import type { User } from "@supabase/supabase-js";
 import {
   InstructorWorkspace,
+  StaffAccountContext,
   StaffCoursePreview,
   StaffOverview,
 } from "./features/staff/StaffPages";
@@ -411,6 +413,14 @@ function memberName(user: User) {
   );
 }
 
+// Staff are marked in app_metadata, which members cannot change themselves.
+// The backend checks this again before accepting any course change.
+function isStaff(user?: User | null) {
+  return user?.app_metadata?.role === "staff";
+}
+
+const STAFF_PAGES: Page[] = ["admin", "builder", "preview", "instructor"];
+
 function memberInitials(user: User) {
   return memberName(user)
     .split(/[\s._-]+/)
@@ -487,6 +497,9 @@ function PublicHeader({
         {user && (
           <button onClick={() => go("dashboard")}>Student Space</button>
         )}
+        {isStaff(user) && (
+          <button onClick={() => go("admin")}>Staff Workspace</button>
+        )}
         <button
           className={active === "about" ? "active" : ""}
           onClick={() => go("about")}
@@ -514,7 +527,7 @@ function CourseCard({ course, index = 0 }: { course: Course; index?: number }) {
   return (
     <article className="course-card" onClick={() => go("course", course)}>
       <div className="course-image">
-        <img src={course.image} alt={`${course.title} course cover`} />
+        <img {...courseImageProps(course.image)} alt={`${course.title} course cover`} />
         <span className="badge">{course.level}</span>
       </div>
       <div className="course-body">
@@ -591,7 +604,7 @@ function Home({
           </div>
           <div className="hero-media">
             <img
-              src={hero}
+              {...courseImageProps(hero)}
               alt="A radio controlled aircraft flying in a clear sky"
             />
             <div className="flight-card">
@@ -691,9 +704,7 @@ function Footer() {
       <p>Building Africa's next generation of practical engineers.</p>
       <div>
         <button onClick={() => go("explore")}>Courses</button>
-        <button>Community</button>
-        <button>About</button>
-        <button>Contact</button>
+        <button onClick={() => go("about")}>About</button>
       </div>
       <small>© 2025 ELITE RC Community. Learn boldly.</small>
     </footer>
@@ -814,7 +825,7 @@ function About({ user, onSignOut }: { user?: User | null; onSignOut?: () => void
             </p>
           </div>
           <div className="hero-media">
-            <img src={hero} alt="A radio controlled aircraft in flight" />
+            <img {...courseImageProps(hero)} alt="A radio controlled aircraft in flight" />
           </div>
         </section>
         <section className="why">
@@ -879,10 +890,7 @@ function CourseDetails({
             <p>{course.desc}</p>
             <div className="instructor">
               <img
-                src={
-                  course.instructorImage ||
-                  "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80"
-                }
+                {...personImageProps(course.instructorImage)}
                 alt={course.instructor}
                 className="instructor-avatar"
               />
@@ -895,7 +903,7 @@ function CourseDetails({
               Start Learning <Icon name="arrow" />
             </Button>
           </div>
-          <img src={course.image} alt={course.title} />
+          <img {...courseImageProps(course.image)} alt={course.title} />
         </section>
         <section className="details-grid">
           <div>
@@ -988,10 +996,6 @@ function CourseDetails({
             </p>
             <hr />
             <Button onClick={() => go("lesson", course)}>Start Learning</Button>
-            <button className="download">
-              <Icon name="download" />
-              Download course overview
-            </button>
           </aside>
         </section>
       </main>
@@ -1037,12 +1041,18 @@ function AppShell({
               {label}
             </button>
           ))}
+          {isStaff(user) && (
+            <button onClick={() => go("admin")}>
+              <Icon name="grid" />
+              Staff Workspace
+            </button>
+          )}
         </nav>
         <div className="side-user">
           <span>{memberInitials(user)}</span>
           <div>
             <b>{memberName(user)}</b>
-            <small>Member</small>
+            <small>{isStaff(user) ? "Staff" : "Member"}</small>
           </div>
         </div>
       </aside>
@@ -1053,7 +1063,7 @@ function AppShell({
           </button>
           <div>
             <span className="status-dot" />
-            All systems operational
+            Signed in as {user.email}
           </div>
           <button className="top-profile" onClick={() => go("profile")}>
             <span>{memberInitials(user)}</span>
@@ -1077,24 +1087,17 @@ function Dashboard({ user, onSignOut }: { user: User; onSignOut: () => void }) {
         </div>
       </div>
       <section className="continue-card">
-        <img src={courses[0].image} alt="RC plane course" />
+        <img {...courseImageProps(courses[0].image)} alt="" />
         <div>
-          <span className="badge">IN PROGRESS</span>
+          <span className="badge">START HERE</span>
           <h2>{courses[0].title}</h2>
-          <p>
-            Next up: <b>{courses[0].sampleLessons[1]}</b>
-          </p>
-          <div className="progress-bar">
-            <i style={{ width: "38%" }} />
-          </div>
-          <small>5 of {courses[0].lessons} lessons complete</small>
-          <Button onClick={() => go("lesson", courses[0])}>
-            Continue learning <Icon name="arrow" />
+          <p>{courses[0].desc}</p>
+          <small>
+            {courses[0].lessons} lessons · {courses[0].duration}
+          </small>
+          <Button onClick={() => go("course", courses[0])}>
+            View course <Icon name="arrow" />
           </Button>
-        </div>
-        <div className="ring">
-          <b>38%</b>
-          <small>complete</small>
         </div>
       </section>
       <section className="panel">
@@ -1107,9 +1110,9 @@ function Dashboard({ user, onSignOut }: { user: User; onSignOut: () => void }) {
         </div>
         <div className="dashboard-overview">
           <article>
-            <span className="eyebrow">UP NEXT</span>
-            <h3>{courses[0].sampleLessons[2] || "Continue your current lesson"}</h3>
-            <p>Pick up where you left off and turn the next idea into something you can build.</p>
+            <span className="eyebrow">EXPLORE</span>
+            <h3>{courses.length} courses to choose from</h3>
+            <p>Browse the catalog and pick the next idea you want to turn into something you can build.</p>
           </article>
           <article>
             <span className="eyebrow">WORKSHOP NOTE</span>
@@ -1272,16 +1275,16 @@ function ProgressPage({
         </div>
       </div>
       <section className="panel">
-        <h2>Course progress</h2>
-        {courses.slice(0, 3).map((course, index) => (
+        <h2>Courses</h2>
+        <p>Lesson progress tracking is coming soon. For now, open any course to keep learning.</p>
+        {courses.slice(0, 3).map((course) => (
           <div className="skill-row" key={course.title}>
-            <img src={course.image} alt="" />
+            <img {...courseImageProps(course.image)} alt="" />
             <div>
               <b>{course.title}</b>
-              <span>{[46, 28, 12][index]}% complete</span>
-              <div className="progress-bar">
-                <i style={{ width: `${[46, 28, 12][index]}%` }} />
-              </div>
+              <span>
+                {course.lessons} lessons · {course.level}
+              </span>
             </div>
             <Button variant="outline" onClick={() => go("course", course)}>
               View course
@@ -1340,7 +1343,7 @@ function Auth() {
           });
       if (result.error) throw result.error;
       if (result.data.session) {
-        go("dashboard");
+        go(isStaff(result.data.session.user) ? "admin" : "dashboard");
       } else {
         setMessage(
           "Account created. Check your email to confirm your account, then sign in.",
@@ -1583,7 +1586,7 @@ function ProfilePage({
           <span className="profile-avatar">{memberInitials(user)}</span>
           <div>
             <h2>{memberName(user)}</h2>
-            <p>Student builder</p>
+            <p>{isStaff(user) ? "Staff" : "Member"}</p>
           </div>
         </div>
         <div className="profile-form">
@@ -1750,7 +1753,7 @@ export default function App() {
   // Staff pages stay open with an empty library so the first course can be added.
   if (
     courses.length === 0 &&
-    !["admin", "builder", "instructor", "auth", "reset-password"].includes(page)
+    ![...STAFF_PAGES, "auth", "reset-password"].includes(page)
   ) {
     return (
       <main className="auth">
@@ -1760,7 +1763,11 @@ export default function App() {
             <span className="eyebrow light">COURSE LIBRARY</span>
             <h1>No published courses yet.</h1>
             <p>Staff can add the first course from the staff workspace.</p>
-            <Button onClick={() => setPage("auth")}>Staff sign in</Button>
+            {isStaff(user) ? (
+              <Button onClick={() => setPage("admin")}>Open staff workspace</Button>
+            ) : (
+              <Button onClick={() => setPage("auth")}>Staff sign in</Button>
+            )}
             <Button variant="outline" onClick={() => window.location.reload()}>
               Refresh
             </Button>
@@ -1769,7 +1776,33 @@ export default function App() {
       </main>
     );
   }
-  return page === "home" ? (
+  // Hiding staff pages here is for clarity; the backend refuses changes from non-staff.
+  if (STAFF_PAGES.includes(page) && !user) return <Auth />;
+  if (STAFF_PAGES.includes(page) && !isStaff(user)) {
+    return (
+      <main className="auth">
+        <section>
+          <Logo />
+          <div>
+            <span className="eyebrow light">STAFF ONLY</span>
+            <h1>This area is for staff.</h1>
+            <p>
+              You are signed in as {user?.email}, which is a member account. Ask
+              an administrator if you need staff access.
+            </p>
+            <Button onClick={() => setPage("home")}>Back to home</Button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+  const staffAccount = user && {
+    name: memberName(user),
+    initials: memberInitials(user),
+    onViewSite: () => go("home"),
+    onSignOut: () => void signOut(),
+  };
+  const content = page === "home" ? (
     <Home user={user} onSignOut={signOut} />
   ) : page === "about" ? (
     <About user={user} onSignOut={signOut} />
@@ -1827,5 +1860,10 @@ export default function App() {
     <ProfilePage user={user} onSignOut={signOut} />
   ) : (
     <Auth />
+  );
+  return (
+    <StaffAccountContext.Provider value={staffAccount}>
+      {content}
+    </StaffAccountContext.Provider>
   );
 }
