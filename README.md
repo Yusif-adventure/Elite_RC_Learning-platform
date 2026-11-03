@@ -120,11 +120,17 @@ next release.
   - Instructor name and profile image
   - Learning objectives
   - Sections and lessons
-- Start a lesson from its overview page
+- Start a lesson from its overview page, which lists what the lesson includes
 - Open uploaded slide resources
 - Watch an uploaded short video preview
 - Open the full lesson video on YouTube
-- View learning progress and profile screens
+- Move to the next or previous lesson
+- Mark lessons complete, see progress on each course, and continue where they
+  left off (needs [`supabase/003_lesson_progress.sql`](./supabase/003_lesson_progress.sql))
+- See every started course on **My learning**
+- Change their name and password on the profile page
+- Use the browser's Back button, refresh, and share links: every page has its
+  own address, such as `/courses/<id>/lessons/2`
 
 ### Instructor and staff experience
 
@@ -234,6 +240,12 @@ src/
 
 - [`frontend/App.tsx`](./frontend/App.tsx): public pages, navigation,
   course state, and lesson rendering.
+- [`frontend/routes.ts`](./frontend/routes.ts): the address of every page.
+- [`frontend/categories.ts`](./frontend/categories.ts): the one list of course
+  categories used by the home page, the catalog, and the course builder.
+- [`frontend/progress.ts`](./frontend/progress.ts) and
+  [`progressApi.ts`](./frontend/progressApi.ts): working out and saving lesson
+  progress.
 - [`frontend/features/staff/courseApi.ts`](./frontend/features/staff/courseApi.ts):
   requests that save courses and upload files.
 - [`frontend/features/staff/StaffPages.tsx`](./frontend/features/staff/StaffPages.tsx):
@@ -254,6 +266,9 @@ src/
   database tables, seed courses, indexes, and storage buckets.
 - [`supabase/002_staff_access.sql`](./supabase/002_staff_access.sql):
   row-level security, and how to grant or remove staff access.
+- [`supabase/003_lesson_progress.sql`](./supabase/003_lesson_progress.sql):
+  the table of completed lessons, which each member can only see and change for
+  themselves.
 
 ## Running the project
 
@@ -276,6 +291,19 @@ To create a production build:
 ```powershell
 npm run build
 ```
+
+To run the frontend tests (Node 22.18 or later runs them directly):
+
+```powershell
+npm test
+```
+
+Every page has its own address, such as `/courses/<id>`. When the built site is
+hosted, the host must answer any address that is not a file with `index.html`,
+or opening a shared link or refreshing a page shows the host's "not found"
+page. Most hosts call this a single-page app or SPA rewrite: for example a
+`_redirects` file with `/* /index.html 200` on Netlify, or a rewrite of
+`/(.*)` to `/index.html` in `vercel.json` on Vercel.
 
 ### Backend
 
@@ -331,16 +359,23 @@ a sign-in they answer `401`; with a member's sign-in they answer `403`.
 2. Open the Supabase SQL Editor.
 3. Run [`supabase/001_shared_course_data.sql`](./supabase/001_shared_course_data.sql).
 4. Run [`supabase/002_staff_access.sql`](./supabase/002_staff_access.sql).
-5. Copy the project URL, anon key, and service role key into `backend/.env`,
+5. Run [`supabase/003_lesson_progress.sql`](./supabase/003_lesson_progress.sql).
+   Until it is run, the app still works but does not save lesson progress, and
+   **My learning** says progress tracking is not switched on yet.
+6. Copy the project URL, anon key, and service role key into `backend/.env`,
    and the URL and anon key into `frontend/.env`.
-6. Start the backend and verify `GET http://localhost:5000/api/status`.
-7. Make at least one staff account (see [Staff access](#staff-access)).
+7. Start the backend and verify `GET http://localhost:5000/api/status`.
+8. Make at least one staff account (see [Staff access](#staff-access)).
 
 The first migration creates normalized course, objective, section, lesson, and
 resource tables. It also seeds two courses and creates public-read storage
 buckets for course images, instructor images, and lesson resources. The second
 turns on row-level security so the anon key, which every browser has, can read
-published courses but cannot change anything.
+published courses but cannot change anything. The third stores which lessons
+each member has completed. The browser reads and writes it directly with the
+member's own sign-in, and row-level security keeps every member to their own
+rows. Lessons are identified by section and title, because saving a course
+replaces its lessons, so renaming a lesson resets its progress.
 
 ### Staff access
 
@@ -457,15 +492,14 @@ Still to do:
 
 ### Learner accounts and progress
 
-- Associate learner progress with authenticated users.
-- Save completed lessons to the database.
-- Track course enrollment.
-- Track course completion percentage.
-- Add resume-learning behavior.
+Done: completed lessons saved per member, course completion percentage,
+continue where you left off, real profile data, and changing name and
+password.
+
+Still to do:
+
 - Add completion certificates or achievements if required.
-- Replace the current placeholder profile data with the authenticated user's
-  profile.
-- Allow users to update their name, profile image, and account details.
+- Allow members to add a profile image and change their email address.
 
 ### Instructor profile management
 
@@ -569,9 +603,9 @@ cd backend
 npm test
 ```
 
-There are currently no repository-level automated frontend tests. The main
-validation is the production build and manual browser testing of the learner
-and staff flows.
+The frontend has unit tests for page addresses, categories, and progress
+(`cd frontend` then `npm test`). Pages themselves are checked with the
+production build and browser testing of the learner and staff flows.
 
 On November 3, these were checked in Edge against the real Supabase project, at
 1366px, 390px, and 360px widths:
@@ -590,3 +624,22 @@ On November 3, these were checked in Edge against the real Supabase project, at
   can sign out.
 - Wrong file types, empty files, and oversized files are refused with a clear
   message, and nothing reaches storage.
+
+These were also checked in Edge on the same day after the page and progress
+work:
+
+- Opening a course or lesson link directly, Back, Forward, and refresh all keep
+  the right page; unknown courses, lessons, and addresses show a clear "not
+  found" page.
+- Home page category tiles open the catalog filtered to that category, and
+  empty categories say "Coming soon".
+- Next and Previous lesson, and the last lesson's Finish course.
+- With progress on: Complete & continue, the course page's progress bar and
+  Continue learning, the dashboard, **My learning**, and Mark as not done. These
+  ran with the progress table simulated in the browser, because
+  `003_lesson_progress.sql` had not been run yet; check them again for real once
+  it has.
+- With progress off (the real database at the time): no errors, and the pages
+  fall back to their earlier content.
+- Signing in from a lesson returns to that lesson.
+- Changing name and password, then signing in with the new password.

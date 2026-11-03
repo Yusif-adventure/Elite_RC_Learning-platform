@@ -1,4 +1,5 @@
 import { useState, type DragEvent, type ReactNode } from "react";
+import { CATEGORY_NAMES } from "../../categories";
 import { uploadFile, type UploadKind } from "./courseApi";
 import { StaffButton, StaffShell } from "./StaffPages";
 import type {
@@ -15,8 +16,6 @@ const MAX_SLIDE_BYTES = 20 * MEGABYTE;
 const IMAGE_TYPES = ".png,.jpg,.jpeg,.webp,.gif";
 const IMAGE_HINT = "PNG, JPG, WEBP or GIF, up to 10 MB";
 const DIFFICULTIES = ["Beginner", "Intermediate", "Advanced"];
-// These match the filters on the Explore Courses page.
-const CATEGORIES = ["RC Planes", "RC Cars", "RC Boats", "Electronics"];
 const DEFAULT_INSTRUCTOR = "ELITE RC Instructor";
 const YOUTUBE_LINK =
   /^(https?:\/\/)?(www\.|m\.)?(youtube\.com|youtu\.be)\/\S+$/i;
@@ -415,7 +414,7 @@ export function CourseBuilderPage({
     (instructorImage ? 1 : 0);
   const categories = [
     ...new Set([
-      ...CATEGORIES,
+      ...CATEGORY_NAMES,
       ...(editingCourse?.category ? [editingCourse.category] : []),
     ]),
   ];

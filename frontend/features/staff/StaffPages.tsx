@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { courseImageProps } from "../../imageFallback";
 
-type StaffPage = "admin" | "builder" | "preview" | "instructor";
+type StaffPage = "admin" | "builder" | "instructor" | "course";
 
 // The signed-in staff member, shown in the staff sidebar.
 export type StaffAccount = {
@@ -172,8 +172,8 @@ export function StaffOverview({
       <section className="panel">
         <div className="panel-head">
           <div>
-            <h2>Course management</h2>
-            <p>Review published content and assign instructor ownership.</p>
+            <h2>Published courses</h2>
+            <p>Everything learners can see right now.</p>
           </div>
           <StaffButton
             variant="outline"
@@ -188,9 +188,16 @@ export function StaffOverview({
             <div>
               <b>{course.title}</b>
               <span>
-                {course.category} · {course.level} · {course.lessons} lessons
+                {course.category} · {course.level} · {course.lessons}{" "}
+                {course.lessons === 1 ? "lesson" : "lessons"}
               </span>
             </div>
+            <StaffButton
+              variant="outline"
+              onClick={() => onNavigate("course", course)}
+            >
+              View
+            </StaffButton>
             <StaffButton
               variant="outline"
               onClick={() => onNavigate("builder", course)}
@@ -228,7 +235,7 @@ export function InstructorWorkspace({
           <p>Organize your curriculum and keep every practical lesson moving.</p>
         </div>
         <StaffButton onClick={() => onNavigate("builder")}>
-          Create lesson plan
+          Create course
         </StaffButton>
       </div>
       <section className="panel">
@@ -258,55 +265,21 @@ export function InstructorWorkspace({
             </div>
             <StaffButton
               variant="outline"
+              onClick={() => onNavigate("course", course)}
+            >
+              View
+            </StaffButton>
+            <StaffButton
+              variant="outline"
               onClick={() => onNavigate("builder", course)}
             >
-              Edit course
+              Edit
             </StaffButton>
             <StaffButton variant="outline" onClick={() => onDeleteCourse(course)}>
               Delete
             </StaffButton>
           </div>
         ))}
-      </section>
-    </StaffShell>
-  );
-}
-
-export function StaffCoursePreview({
-  course,
-  onNavigate,
-}: {
-  course: StaffCourse;
-  onNavigate: StaffPagesProps["onNavigate"];
-}) {
-  return (
-    <StaffShell active="preview" onNavigate={onNavigate}>
-      <div className="page-title">
-        <div>
-          <span className="eyebrow">COURSE PREVIEW</span>
-          <h1>{course.title}</h1>
-          <p>Review the student-facing experience before publishing.</p>
-        </div>
-        <StaffButton variant="outline" onClick={() => onNavigate("admin")}>
-          Back to courses
-        </StaffButton>
-      </div>
-      <section className="panel preview-panel">
-        <img {...courseImageProps(course.image)} alt="" />
-        <div>
-          <span className="badge">{course.level}</span>
-          <h2>{course.title}</h2>
-          <p>{course.desc}</p>
-          <p>
-            <b>Instructor:</b> {course.instructor}
-          </p>
-          <h3>Curriculum</h3>
-          <ul>
-            {course.sections.map((section) => (
-              <li key={section}>{section}</li>
-            ))}
-          </ul>
-        </div>
       </section>
     </StaffShell>
   );
