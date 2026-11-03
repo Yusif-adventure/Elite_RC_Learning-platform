@@ -414,7 +414,7 @@ function memberName(user: User) {
 // Staff are marked in app_metadata, which members cannot change themselves.
 // The backend checks this again before accepting any course change.
 function isStaff(user?: User | null) {
-  return user?.app_metadata?.role === "staff";
+  return ["staff", "instructor"].includes(user?.app_metadata?.role);
 }
 
 const STAFF_PAGES: Page[] = ["admin", "builder", "instructor"];

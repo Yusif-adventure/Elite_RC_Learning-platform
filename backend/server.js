@@ -112,7 +112,7 @@ function requireSupabaseAdmin(res) {
 // Staff are marked in app_metadata, which only the service key can change.
 // user_metadata is not used because members can write anything into it.
 function isStaff(user) {
-  return user?.app_metadata?.role === "staff";
+  return ["staff", "instructor"].includes(user?.app_metadata?.role);
 }
 
 async function requireStaff(req, res, next) {

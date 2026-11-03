@@ -14,6 +14,7 @@ const MEGABYTE = 1024 * 1024;
 const STAFF_TOKEN = "staff-sign-in";
 const MEMBER_TOKEN = "member-sign-in";
 const SELF_NAMED_STAFF_TOKEN = "self-named-staff-sign-in";
+const INSTRUCTOR_TOKEN = "instructor-sign-in";
 let staffUser;
 
 let fake;
@@ -78,6 +79,10 @@ beforeEach(() => {
     appMetadata: { role: "staff" },
   });
   fake.addUser(MEMBER_TOKEN, { email: "member@example.com" });
+  fake.addUser(INSTRUCTOR_TOKEN, {
+    email: "instructor@example.com",
+    appMetadata: { role: "instructor" },
+  });
   // Members can write anything into their own user_metadata when they sign up.
   fake.addUser(SELF_NAMED_STAFF_TOKEN, {
     email: "sneaky@example.com",
@@ -542,6 +547,16 @@ test("a new course records which staff member created it", async () => {
   const [row] = fake.db.courses;
   assert.equal(row.id, created.id);
   assert.equal(row.created_by, staffUser.id);
+});
+
+test("an instructor role can manage course content", async () => {
+  const response = await sendCourse(
+    "POST",
+    "/api/courses",
+    course({ title: "Instructor Setup" }),
+    { token: INSTRUCTOR_TOKEN },
+  );
+  assert.equal(response.status, 201);
 });
 
 test("editing a course keeps the staff member who created it", async () => {

@@ -55,7 +55,7 @@ using (exists (
 ));
 
 -- 2. Making someone staff
--- Staff are marked with "role": "staff" in app_metadata. Members cannot edit
+-- Staff and instructors are marked with "role": "staff" or "instructor" in app_metadata. Members cannot edit
 -- app_metadata themselves, unlike user_metadata, which they can.
 -- The person must sign up in the app first. Then run this in the Supabase
 -- SQL Editor with their email address, and ask them to sign out and back in.
@@ -63,6 +63,7 @@ using (exists (
 -- update auth.users
 -- set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role": "staff"}'::jsonb
 -- where email = 'person@example.com';
+-- Use {"role": "instructor"} for an instructor-only account.
 --
 -- To see who is staff:
 --
