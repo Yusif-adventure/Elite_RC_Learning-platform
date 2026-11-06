@@ -564,3 +564,22 @@
     padding: 0 12px;
   }
 }
+
+/* Save as draft and Publish sit side by side. */
+.form-savebar-actions {
+  display: flex;
+  flex: none;
+  gap: 10px;
+}
+@media (max-width: 760px) {
+  .form-savebar {
+    flex-wrap: wrap;
+  }
+  .form-savebar-actions {
+    width: 100%;
+  }
+  .form-savebar-actions .btn {
+    flex: 1;
+    min-width: 0;
+  }
+}

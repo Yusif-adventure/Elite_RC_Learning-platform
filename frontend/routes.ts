@@ -5,6 +5,8 @@ export type Route =
   | { page: "home" }
   | { page: "explore"; category?: string; level?: string; search?: string }
   | { page: "about" }
+  | { page: "privacy" }
+  | { page: "terms" }
   | { page: "course"; courseId: string }
   | { page: "lesson"; courseId: string; lessonIndex: number }
   | { page: "auth"; register?: boolean; next?: string }
@@ -14,6 +16,7 @@ export type Route =
   | { page: "profile" }
   | { page: "admin" }
   | { page: "instructor" }
+  | { page: "members" }
   | { page: "builder"; courseId?: string }
   | { page: "not-found" };
 
@@ -22,6 +25,10 @@ export type Page = Route["page"];
 const fixedPages: Record<string, Route> = {
   "/": { page: "home" },
   "/about": { page: "about" },
+  "/privacy": { page: "privacy" },
+  "/privacy-policy": { page: "privacy" },
+  "/terms": { page: "terms" },
+  "/terms-of-service": { page: "terms" },
   "/sign-in": { page: "auth" },
   "/join": { page: "auth", register: true },
   "/reset-password": { page: "reset-password" },
@@ -30,6 +37,7 @@ const fixedPages: Record<string, Route> = {
   "/profile": { page: "profile" },
   "/staff": { page: "admin" },
   "/staff/instructors": { page: "instructor" },
+  "/staff/members": { page: "members" },
   "/staff/courses/new": { page: "builder" },
 };
 

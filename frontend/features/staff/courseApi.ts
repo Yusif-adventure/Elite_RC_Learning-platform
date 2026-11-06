@@ -1,4 +1,5 @@
 import { supabase } from "../../supabaseClient";
+import type { Member, Role, StaffProgressRow } from "../../staffStats";
 import type { CourseResource, StaffCourse } from "./StaffPages";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
@@ -56,4 +57,33 @@ export async function uploadFile(file: File, kind: UploadKind): Promise<CourseRe
   });
   const payload: { file: CourseResource } = await response.json();
   return payload.file;
+}
+
+// Staff dashboard: every course including drafts, every member, and all progress.
+async function getJson<T>(path: string, key: string): Promise<T> {
+  const response = await send(path, {});
+  const payload: Record<string, T> = await response.json();
+  return payload[key];
+}
+
+export function fetchStaffCourses() {
+  return getJson<StaffCourse[]>("/api/staff/courses", "courses");
+}
+
+export function fetchMembers() {
+  return getJson<Member[]>("/api/staff/members", "members");
+}
+
+export function fetchStaffProgress() {
+  return getJson<StaffProgressRow[]>("/api/staff/progress", "progress");
+}
+
+export async function setMemberRole(memberId: string, role: Role): Promise<Member> {
+  const response = await send(`/api/staff/members/${encodeURIComponent(memberId)}/role`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+  const payload: { member: Member } = await response.json();
+  return payload.member;
 }

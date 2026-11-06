@@ -1,0 +1,155 @@
+/* Site footer: brand, grouped links, and a bottom bar.
+   Loaded after index.css; the class selectors outrank its older footer rules. */
+
+.site-footer {
+  position: relative;
+  display: block;
+  padding: 64px max(5vw, 24px) 28px;
+  color: #c1d0df;
+  background: #04152e;
+}
+/* A thin brand-coloured line along the top edge. */
+.site-footer::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, var(--blue), var(--cyan));
+}
+
+.site-footer .footer-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr);
+  gap: 48px;
+  padding-bottom: 40px;
+}
+
+/* index.css styles every button inside a footer div as a link; keep the logo a logo. */
+.site-footer .footer-brand .brand,
+.site-footer .footer-brand .brand:hover {
+  min-height: 0;
+  color: #fff;
+  font-weight: inherit;
+  text-decoration: none;
+}
+
+.site-footer .footer-brand p {
+  max-width: 34ch;
+  margin: 18px 0 0;
+  color: #9fb3c8;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.site-footer .footer-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 32px;
+}
+.site-footer .footer-group {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 4px;
+}
+.site-footer .footer-group h2 {
+  margin: 0 0 10px;
+  color: #73d1ff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.site-footer .footer-group button,
+.site-footer .footer-group a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  color: #c1d0df;
+  background: none;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+.site-footer .footer-group a span[aria-hidden] {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.site-footer .footer-group button:hover,
+.site-footer .footer-group a:hover {
+  color: #fff;
+  text-decoration: none;
+}
+.site-footer .footer-group button:focus-visible,
+.site-footer .footer-group a:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.site-footer .footer-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 24px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.site-footer .footer-bottom small {
+  padding: 0;
+  border: 0;
+  color: #7f95ad;
+  font-size: 12px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Tablets: brand on its own row above the three link columns. */
+@media (max-width: 1100px) {
+  .site-footer .footer-main {
+    grid-template-columns: 1fr;
+    gap: 36px;
+  }
+}
+
+/* Phones: two link columns with roomy tap targets, then a stacked bottom bar. */
+@media (max-width: 760px) {
+  .site-footer {
+    padding: 48px 20px 24px;
+  }
+  .site-footer .footer-main {
+    gap: 32px;
+    padding-bottom: 28px;
+  }
+  .site-footer .footer-brand p {
+    margin-top: 14px;
+  }
+  .site-footer .footer-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px 20px;
+    padding-top: 28px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .site-footer .footer-group button,
+  .site-footer .footer-group a {
+    min-height: 40px;
+    font-size: 15px;
+  }
+  .site-footer .footer-bottom {
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 20px;
+  }
+}

@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { HeroSky, NightSky, useScrollReveal } from "./HomeMotion";
 import { courseImageProps, personImageProps } from "./imageFallback";
 import type { User } from "@supabase/supabase-js";
+import { PrivacyPolicyContent, TermsOfServiceContent } from "./LegalPages";
 import {
   InstructorWorkspace,
+  MembersPage,
   StaffAccountContext,
   StaffOverview,
 } from "./features/staff/StaffPages";
@@ -12,8 +15,12 @@ import {
   API_URL,
   createCourse,
   removeCourse,
+  setMemberRole,
   updateCourse,
 } from "./features/staff/courseApi";
+import { ConfirmDialog, errorText, useToast } from "./features/staff/Feedback";
+import { useStaffData } from "./features/staff/useStaffData";
+import type { Member, Role } from "./staffStats";
 import { supabase } from "./supabaseClient";
 import { parsePath, parseRoute, routePath, type Page, type Route } from "./routes";
 import { CATEGORIES, catalogCategories } from "./categories";
@@ -416,7 +423,12 @@ function isStaff(user?: User | null) {
   return ["staff", "instructor"].includes(user?.app_metadata?.role);
 }
 
-const STAFF_PAGES: Page[] = ["admin", "builder", "instructor"];
+function roleLabel(user?: User | null) {
+  const role = user?.app_metadata?.role;
+  return role === "instructor" ? "Instructor" : role === "staff" ? "Staff" : "Member";
+}
+
+const STAFF_PAGES: Page[] = ["admin", "builder", "instructor", "members"];
 
 function memberInitials(user: User) {
   return initialsOf(memberName(user));
@@ -577,11 +589,14 @@ function Home({
     courses.filter((course) => course.category === category).length;
   const lessonTotal = courses.reduce((total, course) => total + lessonCount(course), 0);
   const instructors = [...new Set(courses.map((course) => course.instructor))];
+  const mainRef = useRef<HTMLElement>(null);
+  useScrollReveal(mainRef);
   return (
     <>
       <PublicHeader active="home" user={user} onSignOut={onSignOut} />
-      <main className="public-main">
+      <main className="public-main" ref={mainRef}>
         <section className="hero">
+          <HeroSky />
           <div className="hero-copy">
             <span className="eyebrow">ENGINEERING STARTS WITH CURIOSITY</span>
             <h1>
@@ -640,7 +655,7 @@ function Home({
           </div>
         </section>
         <section className="section">
-          <div className="section-head">
+          <div className="section-head" data-reveal>
             <div>
               <span className="eyebrow">START YOUR JOURNEY</span>
               <h2>Featured courses</h2>
@@ -649,20 +664,21 @@ function Home({
               View all courses <Icon name="arrow" size={16} />
             </button>
           </div>
-          <div className="course-grid">
+          <div className="course-grid" data-reveal-group>
             {getFeaturedCourses().map((c, i) => (
               <CourseCard course={c} index={i} key={c.title} />
             ))}
           </div>
         </section>
         <section className="category-section">
-          <div className="section-head">
+          <NightSky />
+          <div className="section-head" data-reveal>
             <div>
               <span className="eyebrow light">EXPLORE THE WORKSHOP</span>
               <h2>What will you build next?</h2>
             </div>
           </div>
-          <div className="category-grid">
+          <div className="category-grid" data-reveal-group="left">
             {CATEGORIES.map(({ icon, name, blurb }) => {
               const count = coursesIn(name);
               return (
@@ -689,7 +705,7 @@ function Home({
           </div>
         </section>
         <section className="why">
-          <div>
+          <div data-reveal="left">
             <span className="eyebrow">WHY ELITE RC</span>
             <h2>Engineering made tangible.</h2>
             <p>
@@ -697,7 +713,7 @@ function Home({
               confidence from the first lesson.
             </p>
           </div>
-          <div className="why-grid">
+          <div className="why-grid" data-reveal-group="zoom">
             {[
               [
                 "01",
@@ -729,16 +745,42 @@ function Home({
   );
 }
 
+// The community group linked from the Privacy Policy's contact section.
+const COMMUNITY_URL = "https://chat.whatsapp.com/CJUqUROgIGX0t2O4FJjhSG?s=cl&p=a&iam=2";
+
 function Footer() {
   return (
-    <footer>
-      <Logo />
-      <p>Building Africa's next generation of practical engineers.</p>
-      <div>
-        <button onClick={() => go("explore")}>Courses</button>
-        <button onClick={() => go("about")}>About</button>
+    <footer className="site-footer">
+      <div className="footer-main">
+        <div className="footer-brand">
+          <Logo />
+          <p>Building Africa's next generation of practical engineers.</p>
+        </div>
+        <nav className="footer-nav" aria-label="Footer">
+          <div className="footer-group">
+            <h2>Learn</h2>
+            <button type="button" onClick={() => go("explore")}>Browse courses</button>
+            <button type="button" onClick={() => go("dashboard")}>Student space</button>
+          </div>
+          <div className="footer-group">
+            <h2>Community</h2>
+            <button type="button" onClick={() => go("about")}>About us</button>
+            <a href={COMMUNITY_URL} target="_blank" rel="noopener noreferrer">
+              WhatsApp group <span aria-hidden="true">↗</span>
+              <span className="visually-hidden"> (opens in a new tab)</span>
+            </a>
+          </div>
+          <div className="footer-group">
+            <h2>Legal</h2>
+            <button type="button" onClick={() => go("privacy")}>Privacy Policy</button>
+            <button type="button" onClick={() => go("terms")}>Terms of Service</button>
+          </div>
+        </nav>
       </div>
-      <small>© {new Date().getFullYear()} ELITE RC Community. Learn boldly.</small>
+      <div className="footer-bottom">
+        <small>© {new Date().getFullYear()} ELITE RC Community. All rights reserved.</small>
+        <small>Learn boldly.</small>
+      </div>
     </footer>
   );
 }
@@ -904,6 +946,26 @@ function About({ user, onSignOut }: { user?: User | null; onSignOut?: () => void
           </div>
         </section>
       </main>
+      <Footer />
+    </>
+  );
+}
+
+function PrivacyPolicyPage({ user, onSignOut }: { user?: User | null; onSignOut?: () => void }) {
+  return (
+    <>
+      <PublicHeader user={user} onSignOut={onSignOut} />
+      <PrivacyPolicyContent onNavigate={go} />
+      <Footer />
+    </>
+  );
+}
+
+function TermsOfServicePage({ user, onSignOut }: { user?: User | null; onSignOut?: () => void }) {
+  return (
+    <>
+      <PublicHeader user={user} onSignOut={onSignOut} />
+      <TermsOfServiceContent onNavigate={go} />
       <Footer />
     </>
   );
@@ -1134,7 +1196,7 @@ function AppShell({
           <span>{memberInitials(user)}</span>
           <div>
             <b>{memberName(user)}</b>
-            <small>{isStaff(user) ? "Staff" : "Member"}</small>
+            <small>{roleLabel(user)}</small>
           </div>
         </div>
       </aside>
@@ -1806,6 +1868,19 @@ function Auth({ returnTo, startRegistering = false }: { returnTo?: Route; startR
                 ? "Create account"
                 : "Sign in"}
           </Button>
+          {register && !forgotPassword && (
+            <p className="auth-legal-note">
+              By creating an account, you agree to our{" "}
+              <button type="button" onClick={() => go("terms")}>
+                Terms of Service
+              </button>{" "}
+              and{" "}
+              <button type="button" onClick={() => go("privacy")}>
+                Privacy Policy
+              </button>
+              .
+            </p>
+          )}
           {!register && !forgotPassword && (
             <button
               className="forgot"
@@ -1981,7 +2056,7 @@ function ProfilePage({
           <div>
             <h2>{memberName(user)}</h2>
             <p>
-              {isStaff(user) ? "Staff" : "Member"} · {user.email}
+              {roleLabel(user)} · {user.email}
             </p>
           </div>
           <Button variant="outline" onClick={onSignOut}>
@@ -2127,6 +2202,8 @@ function pageTitle(route: Route, course?: Course) {
   const titles: Partial<Record<Page, string>> = {
     explore: "Courses",
     about: "About",
+    privacy: "Privacy Policy",
+    terms: "Terms of Service",
     auth: "Sign in",
     "reset-password": "Reset password",
     dashboard: "Dashboard",
@@ -2134,6 +2211,7 @@ function pageTitle(route: Route, course?: Course) {
     profile: "Profile",
     admin: "Staff workspace",
     instructor: "Instructor workspace",
+    members: "Members",
     builder: course ? `Edit ${course.title}` : "New course",
     "not-found": "Page not found",
   };
@@ -2158,6 +2236,11 @@ export default function App() {
   const [courseLoadError, setCourseLoadError] = useState("");
   const [progress, setProgress] = useState<ProgressState>({ status: "off", rows: [] });
   const page = route.page;
+  const notify = useToast();
+  // Drafts, members, and everyone's progress, loaded only for staff pages.
+  const staffData = useStaffData(isStaff(user) && STAFF_PAGES.includes(page));
+  const [pendingDelete, setPendingDelete] = useState<Course | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   navigateTo = (next, { replace = false } = {}) => {
     const path = routePath(next);
@@ -2290,48 +2373,107 @@ export default function App() {
   }, []);
 
   void courseVersion;
+  // The builder can edit drafts, which only the staff course list includes.
   const routeCourse =
     "courseId" in route && route.courseId
-      ? courses.find((course) => course.id === route.courseId)
+      ? (page === "builder" ? staffData.courses : courses).find(
+          (course) => course.id === route.courseId,
+        )
       : undefined;
 
   useEffect(() => {
     document.title = pageTitle(route, routeCourse);
   });
 
+  // Learners only see published courses, so a draft leaves the public list.
+  const syncPublicCourse = (saved: Course) => {
+    const others = courses.filter((item) => item.id !== saved.id);
+    courses =
+      saved.status === "published"
+        ? courses.some((item) => item.id === saved.id)
+          ? courses.map((item) => (item.id === saved.id ? saved : item))
+          : [...others, saved]
+        : others;
+    refreshCourses((version) => version + 1);
+  };
+
   const saveCourse = async (course: Course) => {
     const editingCourse = page === "builder" ? routeCourse : undefined;
-    // The builder has no publish step yet, so saving must keep a course visible to learners.
+    const status = course.status === "draft" ? "draft" : "published";
     const savedCourse = editingCourse?.id
-      ? await updateCourse({
-          ...course,
-          id: editingCourse.id,
-          status: editingCourse.status ?? "published",
-        })
-      : await createCourse({ ...course, status: "published" });
-
-    courses = editingCourse?.id
-      ? courses.map((item) => (item.id === savedCourse.id ? savedCourse : item))
-      : [...courses, savedCourse];
-    refreshCourses((version) => version + 1);
+      ? await updateCourse({ ...course, id: editingCourse.id, status })
+      : await createCourse({ ...course, status });
+    syncPublicCourse(savedCourse);
+    staffData.reload();
+    notify(
+      status === "published"
+        ? `"${savedCourse.title}" is published and visible to learners.`
+        : `"${savedCourse.title}" is saved as a draft. Only staff can see it.`,
+    );
     navigateTo({ page: "admin" });
   };
-  const deleteCourse = async (course: Course) => {
-    if (!window.confirm(`Delete "${course.title}"? This cannot be undone.`))
-      return;
+
+  const togglePublish = async (course: Course) => {
+    const status = course.status === "published" ? "draft" : "published";
+    try {
+      const savedCourse = await updateCourse({ ...course, status });
+      syncPublicCourse(savedCourse);
+      staffData.setData((current) => ({
+        ...current,
+        courses: current.courses.map((item) =>
+          item.id === savedCourse.id ? { ...item, ...savedCourse } : item,
+        ),
+      }));
+      staffData.reload();
+      notify(
+        status === "published"
+          ? `"${course.title}" is now live for learners.`
+          : `"${course.title}" moved to drafts. Learners can no longer see it.`,
+      );
+    } catch (error) {
+      notify(errorText(error, "The course could not be updated. Please try again."), "error");
+    }
+  };
+
+  const deleteCourse = (course: Course) => setPendingDelete(course);
+
+  const confirmDelete = async () => {
+    const course = pendingDelete;
+    if (!course) return;
+    setDeleting(true);
     try {
       await removeCourse(course);
     } catch (error) {
-      window.alert(
-        error instanceof Error
-          ? error.message
-          : "The course could not be deleted.",
-      );
+      setDeleting(false);
+      notify(errorText(error, "The course could not be deleted. Please try again."), "error");
       return;
     }
     courses = courses.filter((item) => item.id !== course.id);
     refreshCourses((version) => version + 1);
-    navigateTo({ page: "admin" });
+    staffData.setData((current) => ({
+      ...current,
+      courses: current.courses.filter((item) => item.id !== course.id),
+      progress: current.progress.filter((row) => row.course_id !== course.id),
+    }));
+    setDeleting(false);
+    setPendingDelete(null);
+    notify(`"${course.title}" was deleted.`);
+    if (page === "builder") navigateTo({ page: "admin" });
+  };
+
+  const changeRole = async (member: Member, role: Role) => {
+    try {
+      const updated = await setMemberRole(member.id, role);
+      staffData.setData((current) => ({
+        ...current,
+        members: current.members.map((item) => (item.id === updated.id ? updated : item)),
+      }));
+      const label = { member: "a learner", instructor: "an instructor", staff: "staff" }[updated.role];
+      notify(`${updated.name} is now ${label}.`);
+    } catch (error) {
+      notify(errorText(error, "The role could not be changed. Please try again."), "error");
+      throw error;
+    }
   };
 
   if (courseLoadState === "loading") {
@@ -2410,12 +2552,36 @@ export default function App() {
     />
   );
   const staffAccount = user && {
+    id: user.id,
     name: memberName(user),
     initials: memberInitials(user),
+    role: user.app_metadata?.role === "instructor" ? ("instructor" as const) : ("staff" as const),
     onViewSite: () => go("home"),
     onSignOut: () => void signOut(),
   };
   const staffNavigate = (nextPage: Page, course?: Course) => go(nextPage, course);
+  const dashboardProps = {
+    courses: staffData.courses,
+    members: staffData.members,
+    progress: staffData.progress,
+    status: staffData.status,
+    error: staffData.error,
+    notes: staffData.notes,
+    onReload: staffData.reload,
+    onNavigate: staffNavigate,
+    onSaveCourse: saveCourse,
+    onDeleteCourse: deleteCourse,
+    onTogglePublish: togglePublish,
+    onChangeRole: changeRole,
+  };
+  const staffLoading = staffData.status === "idle" || staffData.status === "loading";
+  const deleteLearners = pendingDelete
+    ? new Set(
+        staffData.progress
+          .filter((row) => row.course_id === pendingDelete.id)
+          .map((row) => row.user_id),
+      ).size
+    : 0;
 
   let content: ReactNode;
   switch (route.page) {
@@ -2424,6 +2590,12 @@ export default function App() {
       break;
     case "about":
       content = <About user={user} onSignOut={signOut} />;
+      break;
+    case "privacy":
+      content = <PrivacyPolicyPage user={user} onSignOut={signOut} />;
+      break;
+    case "terms":
+      content = <TermsOfServicePage user={user} onSignOut={signOut} />;
       break;
     case "explore":
       content = (
@@ -2501,39 +2673,48 @@ export default function App() {
       content = <ResetPassword />;
       break;
     case "admin":
-      content = (
-        <StaffOverview
-          courses={courses}
-          onNavigate={staffNavigate}
-          onSaveCourse={saveCourse}
-          onDeleteCourse={deleteCourse}
-        />
-      );
+      content = <StaffOverview {...dashboardProps} />;
       break;
     case "instructor":
-      content = (
-        <InstructorWorkspace
-          courses={courses}
-          onNavigate={staffNavigate}
-          onSaveCourse={saveCourse}
-          onDeleteCourse={deleteCourse}
-        />
-      );
+      content = <InstructorWorkspace {...dashboardProps} />;
+      break;
+    case "members":
+      content = <MembersPage {...dashboardProps} />;
       break;
     case "builder":
-      content =
-        route.courseId && !routeCourse ? (
-          courseNotFound
-        ) : (
-          <CourseBuilderPage
-            key={routeCourse?.id ?? "new-course"}
-            courses={courses}
-            onNavigate={staffNavigate}
-            onSaveCourse={saveCourse}
-            onDeleteCourse={deleteCourse}
-            editingCourse={routeCourse}
+      if (route.courseId && staffLoading) {
+        content = (
+          <StatusScreen
+            eyebrow="COURSE BUILDER"
+            title="Opening the course."
+            message="Loading the latest version..."
           />
         );
+      } else if (route.courseId && staffData.status === "error") {
+        content = (
+          <StatusScreen
+            eyebrow="COURSE BUILDER"
+            title="We could not open this course."
+            message={staffData.error}
+          >
+            <Button onClick={staffData.reload}>Try again</Button>
+          </StatusScreen>
+        );
+      } else {
+        content =
+          route.courseId && !routeCourse ? (
+            courseNotFound
+          ) : (
+            <CourseBuilderPage
+              key={routeCourse?.id ?? "new-course"}
+              courses={staffData.courses.length ? staffData.courses : courses}
+              onNavigate={staffNavigate}
+              onSaveCourse={saveCourse}
+              onDeleteCourse={deleteCourse}
+              editingCourse={routeCourse}
+            />
+          );
+      }
       break;
     default:
       content = <NotFound user={user} onSignOut={signOut} />;
@@ -2541,6 +2722,30 @@ export default function App() {
   return (
     <StaffAccountContext.Provider value={staffAccount}>
       {content}
+      {pendingDelete && (
+        <ConfirmDialog
+          title={`Delete "${pendingDelete.title}"?`}
+          confirmLabel="Delete course"
+          busyLabel="Deleting..."
+          busy={deleting}
+          onConfirm={() => void confirmDelete()}
+          onCancel={() => setPendingDelete(null)}
+        >
+          <p>
+            This removes the course and its {lessonCount(pendingDelete)}{" "}
+            {lessonCount(pendingDelete) === 1 ? "lesson" : "lessons"}
+            {deleteLearners > 0 && (
+              <>
+                , along with the progress of <b>{deleteLearners} {deleteLearners === 1 ? "learner" : "learners"}</b>
+              </>
+            )}
+            .
+          </p>
+          <p>
+            <b>This cannot be undone.</b> To hide a course without losing anything, unpublish it instead.
+          </p>
+        </ConfirmDialog>
+      )}
     </StaffAccountContext.Provider>
   );
 }

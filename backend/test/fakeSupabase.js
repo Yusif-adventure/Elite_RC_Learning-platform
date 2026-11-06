@@ -38,15 +38,27 @@ const TABLE_RULES = {
     defaults: { storage_path: null, mime_type: null, size_bytes: null, position: 0 },
     parent: ["lesson_id", "course_lessons"],
   },
+  // From supabase/003_lesson_progress.sql: deleting a course removes its progress.
+  lesson_progress: { defaults: {}, parent: ["course_id", "courses"] },
 };
+
+// Like Supabase Auth's admin API errors, e.g. for an id that matches no account.
+const authError = (status, errorCode, msg) => ({ status, body: { code: status, error_code: errorCode, msg } });
 
 function databaseError(status, code, message) {
   return { status, body: { code, message, details: null, hint: null } };
 }
 
 // Shaped like the user Supabase Auth returns from GET /auth/v1/user.
-function authUser({ id = randomUUID(), email, appMetadata = {}, userMetadata = {} }) {
-  const now = new Date(0).toISOString();
+function authUser({
+  id = randomUUID(),
+  email,
+  appMetadata = {},
+  userMetadata = {},
+  createdAt = new Date(0).toISOString(),
+  lastSignInAt = new Date(0).toISOString(),
+}) {
+  const now = createdAt;
   return {
     id,
     aud: "authenticated",
@@ -55,7 +67,7 @@ function authUser({ id = randomUUID(), email, appMetadata = {}, userMetadata = {
     email_confirmed_at: now,
     phone: "",
     confirmed_at: now,
-    last_sign_in_at: now,
+    last_sign_in_at: lastSignInAt,
     app_metadata: { provider: "email", providers: ["email"], ...appMetadata },
     user_metadata: { email, email_verified: true, ...userMetadata },
     identities: [],
@@ -72,7 +84,10 @@ export async function startFakeSupabase({ serviceKey }) {
   let clock;
   let users;
 
+  let missingTables;
+
   const reset = () => {
+    missingTables = new Set();
     db = Object.fromEntries(Object.keys(TABLE_RULES).map((table) => [table, []]));
     files = new Map();
     failures = new Set();
@@ -129,8 +144,11 @@ export async function startFakeSupabase({ serviceKey }) {
 
   const handleTable = (table, method, url, headers, body) => {
     const filters = [...url.searchParams]
-      .filter(([key]) => !["select", "order", "columns"].includes(key))
+      .filter(([key]) => !["select", "order", "columns", "limit", "offset"].includes(key))
       .map(([key, value]) => [key, value.replace(/^eq\./, "")]);
+    // Like PostgREST, a GET returns at most `limit` rows starting at `offset`.
+    const offset = Number(url.searchParams.get("offset") || 0);
+    const limit = Number(url.searchParams.get("limit") || Infinity);
     for (const [key, value] of filters) {
       if ((key === "id" || key.endsWith("_id")) && !UUID_PATTERN.test(value)) {
         return databaseError(400, "22P02", `invalid input syntax for type uuid: "${value}"`);
@@ -139,7 +157,10 @@ export async function startFakeSupabase({ serviceKey }) {
     const matches = (row) => filters.every(([key, value]) => row[key] === value);
 
     if (method === "GET") {
-      const rows = db[table].filter(matches).map((row) => (table === "courses" ? nestedCourse(row) : row));
+      const rows = db[table]
+        .filter(matches)
+        .slice(offset, offset + limit)
+        .map((row) => (table === "courses" ? nestedCourse(row) : row));
       if (!String(headers.accept).includes("vnd.pgrst.object")) return { status: 200, body: rows };
       return rows.length === 1
         ? { status: 200, body: rows[0] }
@@ -161,11 +182,14 @@ export async function startFakeSupabase({ serviceKey }) {
       const inserted = [];
       const stagedRows = [...db[table]];
       for (const values of [body].flat()) {
+        const createdAt = new Date(++clock).toISOString();
         const row = {
           ...TABLE_RULES[table].defaults,
           ...values,
           id: randomUUID(),
-          created_at: new Date(++clock).toISOString(),
+          created_at: createdAt,
+          // supabase/001 keeps courses.updated_at current with a trigger.
+          ...(table === "courses" ? { updated_at: createdAt } : {}),
         };
         const violation = findViolation(table, row);
         if (violation) {
@@ -185,6 +209,7 @@ export async function startFakeSupabase({ serviceKey }) {
         const violation = findViolation(table, { ...row, ...body }, row.id);
         if (violation) return violation;
         Object.assign(row, body);
+        if (table === "courses") row.updated_at = new Date(++clock).toISOString();
       }
       return { status: 204, body: null };
     }
@@ -241,6 +266,35 @@ export async function startFakeSupabase({ serviceKey }) {
           : { status: 403, body: { code: 403, error_code: "bad_jwt", msg: "invalid JWT: unable to parse or verify signature" } });
         return;
       }
+      // Supabase Auth's admin API: listing accounts and changing app_metadata.
+      // Only the service key may use it.
+      if (url.pathname.startsWith("/auth/v1/admin/users")) {
+        if (req.headers.authorization !== `Bearer ${serviceKey}`) {
+          send(authError(403, "not_admin", "User not allowed"));
+          return;
+        }
+        const everyone = [...users.values()];
+        if (req.method === "GET" && url.pathname === "/auth/v1/admin/users") {
+          const perPage = Number(url.searchParams.get("per_page") || 50);
+          const page = Number(url.searchParams.get("page") || 1);
+          send({
+            status: 200,
+            body: { aud: "authenticated", users: everyone.slice((page - 1) * perPage, page * perPage) },
+          });
+          return;
+        }
+        const id = url.pathname.split("/").pop();
+        const user = everyone.find((candidate) => candidate.id === id);
+        if (req.method === "PUT" && user) {
+          const changes = raw.length ? JSON.parse(raw) : {};
+          // Supabase Auth merges the keys given into the existing app_metadata.
+          if (changes.app_metadata) Object.assign(user.app_metadata, changes.app_metadata);
+          send({ status: 200, body: user });
+          return;
+        }
+        send(authError(404, "user_not_found", "User not found"));
+        return;
+      }
       if (url.pathname.startsWith(publicPrefix)) {
         const file = files.get(decodeURIComponent(url.pathname.slice(publicPrefix.length)));
         if (!file) {
@@ -257,6 +311,11 @@ export async function startFakeSupabase({ serviceKey }) {
       }
       if (url.pathname.startsWith(tablePrefix)) {
         const table = url.pathname.slice(tablePrefix.length);
+        if (missingTables.has(table)) {
+          // What PostgREST answers for a table whose setup SQL was never run.
+          send(databaseError(404, "PGRST205", `Could not find the table 'public.${table}' in the schema cache`));
+          return;
+        }
         if (!db[table]) {
           send(databaseError(404, "42P01", `relation "public.${table}" does not exist`));
           return;
@@ -275,6 +334,8 @@ export async function startFakeSupabase({ serviceKey }) {
     reset,
     close: () => new Promise((resolve) => server.close(resolve)),
     failNext: (target) => failures.add(target),
+    // Acts as if a setup SQL file was never run on the project.
+    dropTable: (table) => missingTables.add(table),
     // Signs someone in: the token then identifies them to Supabase Auth.
     addUser: (token, details) => {
       const user = authUser(details);

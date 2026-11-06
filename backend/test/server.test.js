@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID as randomId } from "node:crypto";
 import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { createServer } from "node:net";
@@ -16,6 +17,8 @@ const MEMBER_TOKEN = "member-sign-in";
 const SELF_NAMED_STAFF_TOKEN = "self-named-staff-sign-in";
 const INSTRUCTOR_TOKEN = "instructor-sign-in";
 let staffUser;
+let memberUser;
+let instructorUser;
 
 let fake;
 const servers = [];
@@ -78,8 +81,8 @@ beforeEach(() => {
     email: "staff@example.com",
     appMetadata: { role: "staff" },
   });
-  fake.addUser(MEMBER_TOKEN, { email: "member@example.com" });
-  fake.addUser(INSTRUCTOR_TOKEN, {
+  memberUser = fake.addUser(MEMBER_TOKEN, { email: "member@example.com" });
+  instructorUser = fake.addUser(INSTRUCTOR_TOKEN, {
     email: "instructor@example.com",
     appMetadata: { role: "instructor" },
   });
@@ -581,4 +584,195 @@ test("when sign-ins cannot be checked, staff are told to try again rather than t
 
   assert.match(await assertJsonError(response, 503), /try again/i);
   assert.equal(fake.db.courses.length, 0);
+});
+
+// Staff dashboard: drafts, members, progress, and roles.
+
+function staffGet(path, { token = STAFF_TOKEN, base = api } = {}) {
+  return fetch(`${base}${path}`, { headers: signedIn(token) });
+}
+
+function setRole(userId, role, { token = STAFF_TOKEN } = {}) {
+  return fetch(`${api}/api/staff/members/${userId}/role`, {
+    method: "PUT",
+    headers: signedIn(token, { "Content-Type": "application/json" }),
+    body: JSON.stringify({ role }),
+  });
+}
+
+function recordProgress(userId, courseId, lessonKey, completedAt) {
+  fake.db.lesson_progress.push({
+    user_id: userId,
+    course_id: courseId,
+    lesson_key: lessonKey,
+    completed_at: completedAt,
+  });
+}
+
+test("staff see draft courses that the public list leaves out", async () => {
+  const published = await createCourse({ title: "Live Course" });
+  await createCourse({ title: "Work In Progress", status: "draft" });
+
+  const publicList = (await (await fetch(`${api}/api/courses`)).json()).courses;
+  const response = await staffGet("/api/staff/courses");
+
+  assert.deepEqual(publicList.map((item) => item.id), [published.id]);
+  assert.equal(response.status, 200);
+  const { courses } = await response.json();
+  assert.deepEqual(
+    courses.map((item) => [item.title, item.status]),
+    [["Live Course", "published"], ["Work In Progress", "draft"]],
+  );
+});
+
+test("the staff course list says who created each course and when it last changed", async () => {
+  const created = await createCourse();
+  const before = (await (await staffGet("/api/staff/courses")).json()).courses[0];
+
+  await sendCourse("PUT", `/api/courses/${created.id}`, course({ desc: "Changed." }));
+  const after = (await (await staffGet("/api/staff/courses")).json()).courses[0];
+
+  assert.equal(before.createdBy, staffUser.id);
+  assert.equal(typeof before.createdAt, "string");
+  assert.ok(after.updatedAt > before.updatedAt);
+});
+
+test("members and signed-out visitors cannot open the staff course list", async () => {
+  await assertJsonError(await staffGet("/api/staff/courses", { token: MEMBER_TOKEN }), 403);
+  await assertJsonError(await staffGet("/api/staff/courses", { token: null }), 401);
+});
+
+test("a course can only be saved as a draft or published", async () => {
+  const response = await sendCourse("POST", "/api/courses", course({ status: "secret" }));
+
+  assert.match(await assertJsonError(response, 400), /draft or published/i);
+  assert.equal(fake.db.courses.length, 0);
+});
+
+test("staff see each member with their role and when they joined", async () => {
+  const ama = fake.addUser("ama-sign-in", {
+    email: "ama@example.com",
+    userMetadata: { full_name: "Ama Kusi" },
+    createdAt: "2026-11-01T10:00:00.000Z",
+    lastSignInAt: "2026-11-05T09:00:00.000Z",
+  });
+
+  const response = await staffGet("/api/staff/members");
+
+  assert.equal(response.status, 200);
+  const { members } = await response.json();
+  const byEmail = Object.fromEntries(members.map((member) => [member.email, member]));
+  assert.deepEqual(byEmail["ama@example.com"], {
+    id: ama.id,
+    email: "ama@example.com",
+    name: "Ama Kusi",
+    role: "member",
+    joinedAt: "2026-11-01T10:00:00.000Z",
+    lastSignInAt: "2026-11-05T09:00:00.000Z",
+  });
+  assert.equal(byEmail["member@example.com"].name, "member");
+  assert.equal(byEmail["staff@example.com"].role, "staff");
+  assert.equal(byEmail["instructor@example.com"].role, "instructor");
+  // A role written into user_metadata by the member themselves does not count.
+  assert.equal(byEmail["sneaky@example.com"].role, "member");
+});
+
+test("every account is listed even beyond the first page of accounts", async () => {
+  for (let index = 0; index < 1000; index += 1) {
+    fake.addUser(`extra-${index}`, { email: `extra-${index}@example.com` });
+  }
+
+  const { members } = await (await staffGet("/api/staff/members")).json();
+
+  assert.equal(members.length, 1004);
+});
+
+test("members cannot see the member list", async () => {
+  await assertJsonError(await staffGet("/api/staff/members", { token: MEMBER_TOKEN }), 403);
+});
+
+test("staff can read every member's lesson progress", async () => {
+  const created = await createCourse();
+  recordProgress(memberUser.id, created.id, '["Setup","Welcome"]', "2026-11-02T08:00:00.000Z");
+  recordProgress(instructorUser.id, created.id, '["Flying","Welcome"]', "2026-11-03T08:00:00.000Z");
+
+  const response = await staffGet("/api/staff/progress");
+
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).progress, [
+    { user_id: memberUser.id, course_id: created.id, lesson_key: '["Setup","Welcome"]', completed_at: "2026-11-02T08:00:00.000Z" },
+    { user_id: instructorUser.id, course_id: created.id, lesson_key: '["Flying","Welcome"]', completed_at: "2026-11-03T08:00:00.000Z" },
+  ]);
+});
+
+test("progress beyond the first page of rows is still returned", async () => {
+  const created = await createCourse();
+  for (let index = 0; index < 1001; index += 1) {
+    recordProgress(randomId(), created.id, '["Setup","Welcome"]', "2026-11-02T08:00:00.000Z");
+  }
+
+  const { progress } = await (await staffGet("/api/staff/progress")).json();
+
+  assert.equal(progress.length, 1001);
+});
+
+test("members cannot read everyone's progress", async () => {
+  await assertJsonError(await staffGet("/api/staff/progress", { token: MEMBER_TOKEN }), 403);
+});
+
+test("staff can make a member an instructor, who can then manage courses", async () => {
+  const response = await setRole(memberUser.id, "instructor");
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).member.role, "instructor");
+  const created = await sendCourse("POST", "/api/courses", course(), { token: MEMBER_TOKEN });
+  assert.equal(created.status, 201);
+});
+
+test("staff can return an instructor to a member account", async () => {
+  const response = await setRole(instructorUser.id, "member");
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).member.role, "member");
+  await assertJsonError(await staffGet("/api/staff/courses", { token: INSTRUCTOR_TOKEN }), 403);
+});
+
+test("instructors cannot change anyone's role", async () => {
+  const response = await setRole(memberUser.id, "staff", { token: INSTRUCTOR_TOKEN });
+
+  assert.match(await assertJsonError(response, 403), /staff/i);
+  assert.equal(memberUser.app_metadata.role, undefined);
+});
+
+test("staff cannot change their own role", async () => {
+  const response = await setRole(staffUser.id, "member");
+
+  assert.match(await assertJsonError(response, 400), /your own/i);
+  assert.equal(staffUser.app_metadata.role, "staff");
+});
+
+test("an unknown role is refused", async () => {
+  const response = await setRole(memberUser.id, "owner");
+
+  assert.equal((await assertJsonError(response, 400)).length > 0, true);
+  assert.equal(memberUser.app_metadata.role, undefined);
+});
+
+test("changing the role of an account that does not exist returns not found", async () => {
+  await assertJsonError(await setRole(randomId(), "instructor"), 404);
+  await assertJsonError(await setRole("not-an-id", "instructor"), 404);
+});
+
+test("without the secret key the member list explains the problem", async () => {
+  const response = await staffGet("/api/staff/members", { base: apiWithoutServiceKey });
+
+  assert.match(await assertJsonError(response, 503), /SUPABASE_SERVICE_ROLE_KEY/);
+});
+
+test("when progress tracking was never set up, staff are told which setup file to run", async () => {
+  fake.dropTable("lesson_progress");
+
+  const response = await staffGet("/api/staff/progress");
+
+  assert.match(await assertJsonError(response, 503), /supabase\/003_lesson_progress\.sql/);
 });

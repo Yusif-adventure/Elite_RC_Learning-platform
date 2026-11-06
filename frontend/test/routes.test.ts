@@ -11,6 +11,8 @@ const addresses = [
   ["/courses/7b1f8a54-3c0e/lessons/1", { page: "lesson", courseId: "7b1f8a54-3c0e", lessonIndex: 0 }],
   ["/courses/7b1f8a54-3c0e/lessons/3", { page: "lesson", courseId: "7b1f8a54-3c0e", lessonIndex: 2 }],
   ["/about", { page: "about" }],
+  ["/privacy", { page: "privacy" }],
+  ["/terms", { page: "terms" }],
   ["/sign-in", { page: "auth" }],
   ["/join", { page: "auth", register: true }],
   ["/sign-in?next=%2Fcourses%2Fabc%2Flessons%2F2", { page: "auth", next: "/courses/abc/lessons/2" }],
@@ -20,6 +22,7 @@ const addresses = [
   ["/profile", { page: "profile" }],
   ["/staff", { page: "admin" }],
   ["/staff/instructors", { page: "instructor" }],
+  ["/staff/members", { page: "members" }],
   ["/staff/courses/new", { page: "builder" }],
   ["/staff/courses/7b1f8a54-3c0e/edit", { page: "builder", courseId: "7b1f8a54-3c0e" }],
 ] as const;
@@ -53,6 +56,13 @@ for (const address of unknownAddresses) {
 test("a trailing slash opens the same page", () => {
   assert.deepEqual(parseRoute("/courses/", ""), { page: "explore" });
   assert.deepEqual(parseRoute("/about/", ""), { page: "about" });
+  assert.deepEqual(parseRoute("/privacy/", ""), { page: "privacy" });
+  assert.deepEqual(parseRoute("/terms/", ""), { page: "terms" });
+});
+
+test("privacy policy and terms aliases open their respective pages", () => {
+  assert.deepEqual(parseRoute("/privacy-policy", ""), { page: "privacy" });
+  assert.deepEqual(parseRoute("/terms-of-service", ""), { page: "terms" });
 });
 
 test("course ids with special characters survive the address bar", () => {
