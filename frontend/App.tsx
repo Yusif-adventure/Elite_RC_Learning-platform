@@ -390,10 +390,9 @@ function Logo({ dark = false }: { dark?: boolean }) {
     <button
       className={`brand ${dark ? "dark" : ""}`}
       onClick={() => go("home")}
+      aria-label="Elite RC Community home"
     >
-      <span className="brand-mark">
-        <Icon name="plane" size={22} />
-      </span>
+      <img className="brand-logo" src="/logo.png" alt="Elite RC Community" />
       <span>
         <b>ELITE RC</b>
         <small>LEARNING HUB</small>
