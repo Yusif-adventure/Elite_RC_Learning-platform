@@ -398,7 +398,7 @@ export function CourseBuilderPage({
   const [sections, setSections] = useState<SectionDraft[]>(() =>
     editingCourse ? draftsFromCourse(editingCourse) : [emptySection()],
   );
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState<false | "draft" | "published">(false);
   const [uploadsInProgress, setUploadsInProgress] = useState(0);
   const [error, setError] = useState("");
   const [showProblems, setShowProblems] = useState(false);
@@ -557,7 +557,10 @@ export function CourseBuilderPage({
     };
   };
 
-  const saveCourse = async () => {
+  const isLive = editingCourse?.status === "published";
+
+  // A draft is visible to staff only; publishing puts the course in front of learners.
+  const saveCourse = async (status: "draft" | "published") => {
     setError("");
     if (findProblem()) {
       setShowProblems(true);
@@ -566,9 +569,9 @@ export function CourseBuilderPage({
       );
       return;
     }
-    setSaving(true);
+    setSaving(status);
     try {
-      await onSaveCourse(buildCourse());
+      await onSaveCourse({ ...buildCourse(), status });
     } catch (saveError) {
       console.error("Unable to save course.", saveError);
       setError(getErrorMessage(saveError));
@@ -584,9 +587,11 @@ export function CourseBuilderPage({
           <span className="eyebrow">COURSE BUILDER</span>
           <h1>{editingCourse ? "Edit course" : "Create a course"}</h1>
           <p>
-            {editingCourse
-              ? "Your changes go live for learners when you save."
-              : "A saved course goes live for learners straight away."}
+            {!editingCourse
+              ? "Save a draft to keep working privately, or publish when it is ready for learners."
+              : isLive
+                ? "This course is live. Saving changes updates what learners see."
+                : "This course is a draft. Only staff can see it until you publish it."}
           </p>
         </div>
         <StaffButton variant="outline" onClick={() => onNavigate("admin")}>
@@ -962,16 +967,27 @@ export function CourseBuilderPage({
                 </span>
               )}
             </div>
-            <StaffButton
-              disabled={saving || uploadsInProgress > 0}
-              onClick={saveCourse}
-            >
-              {saving
-                ? "Saving..."
-                : editingCourse
-                  ? "Save changes"
-                  : "Save course"}
-            </StaffButton>
+            <div className="form-savebar-actions">
+              <StaffButton
+                variant="outline"
+                disabled={Boolean(saving) || uploadsInProgress > 0}
+                onClick={() => void saveCourse("draft")}
+              >
+                {saving === "draft" ? "Saving..." : isLive ? "Move to drafts" : "Save as draft"}
+              </StaffButton>
+              <StaffButton
+                disabled={Boolean(saving) || uploadsInProgress > 0}
+                onClick={() => void saveCourse("published")}
+              >
+                {saving === "published"
+                  ? isLive
+                    ? "Saving..."
+                    : "Publishing..."
+                  : isLive
+                    ? "Save changes"
+                    : "Publish course"}
+              </StaffButton>
+            </div>
           </div>
         </div>
 
