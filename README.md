@@ -323,7 +323,18 @@ SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 PORT=5000
 FRONTEND_ORIGIN=http://localhost:5173
+FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+FRONTEND_ORIGIN_PATTERNS=https://*.vercel.app,https://*.onrender.com
 ```
+
+`FRONTEND_ORIGIN` is the preferred setting for one frontend URL. Use
+`FRONTEND_ORIGINS` only when you must allow multiple frontend origins. If both
+are set, both are allowed. The backend no longer falls back to `*`.
+Use `FRONTEND_ORIGIN_PATTERNS` when you need controlled wildcard matching for
+preview domains (for example `https://*.vercel.app`).
+
+For Render Blueprint deployments, use [`render.yaml`](./render.yaml), which
+enables auto-deploy and pull request previews for the backend service.
 
 `SUPABASE_SERVICE_ROLE_KEY` lets the backend save courses and store uploaded
 files, because row-level security refuses writes from the anon key. It has full
@@ -352,6 +363,12 @@ The backend exposes:
 Staff-only endpoints need an `Authorization: Bearer <access token>` header
 from a signed-in Supabase session. The frontend sends it automatically. Without
 a sign-in they answer `401`; with a member's sign-in they answer `403`.
+
+### Thursday release runbooks
+
+- [Production checklist](./docs/release/2026-11-06-thursday-production-checklist.md)
+- [Member pilot instructions](./docs/release/member-pilot-instructions.md)
+- [Rollback runbook](./docs/release/rollback-runbook.md)
 
 ### Supabase setup
 
@@ -563,7 +580,7 @@ Still to do:
 - Add monitoring, health checks, and alerting.
 - Add a CI pipeline that runs builds, tests, and security checks.
 - Add staging deployment before production release.
-- Document the production deployment and rollback process.
+- Keep deployment, member, and rollback runbooks up to date.
 
 ## Media storage model
 
