@@ -163,15 +163,22 @@ function requireSupabaseAdmin(res) {
 
 // Staff are marked in app_metadata, which only the service key can change.
 // user_metadata is not used because members can write anything into it.
+const ROLES = ["member", "instructor", "staff"];
+
+function roleOf(user) {
+  const role = user?.app_metadata?.role;
+  return role === "staff" || role === "instructor" ? role : "member";
+}
+
 function isStaff(user) {
-  return ["staff", "instructor"].includes(user?.app_metadata?.role);
+  return roleOf(user) !== "member";
 }
 
 async function requireStaff(req, res, next) {
   if (!requireSupabase(res)) return;
   const token = /^Bearer (.+)$/.exec(req.get("authorization") || "")?.[1];
   if (!token) {
-    res.status(401).json({ error: "Sign in with a staff account to change courses." });
+    res.status(401).json({ error: "Sign in with a staff account to continue." });
     return;
   }
   const { data, error } = await supabase.auth.getUser(token);
@@ -181,11 +188,11 @@ async function requireStaff(req, res, next) {
     return;
   }
   if (error || !data?.user) {
-    res.status(401).json({ error: "Your sign-in has expired. Sign in again to change courses." });
+    res.status(401).json({ error: "Your sign-in has expired. Sign in again to continue." });
     return;
   }
   if (!isStaff(data.user)) {
-    res.status(403).json({ error: "Only staff accounts can change courses." });
+    res.status(403).json({ error: "Only staff and instructor accounts can use the staff workspace." });
     return;
   }
   req.user = data.user;
@@ -290,6 +297,9 @@ function validateLessons(lessons, sections) {
 function validateCourse(input) {
   if (!input || typeof input !== "object") return "A course object is required.";
   if (typeof input.title !== "string" || !input.title.trim()) return "Course title is required.";
+  if (input.status !== undefined && !["draft", "published"].includes(input.status)) {
+    return "A course can only be saved as a draft or published.";
+  }
   if (typeof input.instructor !== "string" || !input.instructor.trim()) return "Instructor is required.";
   if (!Array.isArray(input.sections)) return "Sections must be an array.";
   if (input.image && !isWebLink(input.image)) return "Course image must be a web link.";
@@ -517,6 +527,125 @@ app.delete("/api/courses/:id", requireStaff, async (req, res) => {
     return;
   }
   res.status(204).end();
+});
+
+// Staff dashboard. These read across every member, so they use the secret key,
+// and only after requireStaff has checked the request comes from staff.
+
+// Supabase returns at most this many rows or accounts per request.
+const PAGE_SIZE = 1000;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function toMember(user) {
+  return {
+    id: user.id,
+    email: user.email || "",
+    name: String(user.user_metadata?.full_name || user.email?.split("@")[0] || "Member"),
+    role: roleOf(user),
+    joinedAt: user.created_at,
+    lastSignInAt: user.last_sign_in_at || null,
+  };
+}
+
+async function listAllUsers() {
+  const users = [];
+  for (let page = 1; ; page += 1) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: PAGE_SIZE });
+    if (error) throw error;
+    users.push(...data.users);
+    if (data.users.length < PAGE_SIZE) return users;
+  }
+}
+
+// Every course, drafts included, with who created it and when it last changed.
+app.get("/api/staff/courses", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const { data, error } = await supabaseAdmin
+    .from("courses")
+    .select(courseSelect)
+    .order("created_at", { ascending: true });
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  res.json({
+    courses: (data || []).map((row) => ({
+      ...toCourse(row),
+      createdBy: row.created_by,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+  });
+});
+
+app.get("/api/staff/members", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  try {
+    res.json({ members: (await listAllUsers()).map(toMember) });
+  } catch (error) {
+    res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get("/api/staff/progress", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const progress = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    // Ordering by the whole primary key keeps pages from overlapping.
+    const { data, error } = await supabaseAdmin
+      .from("lesson_progress")
+      .select("user_id, course_id, lesson_key, completed_at")
+      .order("completed_at")
+      .order("user_id")
+      .order("course_id")
+      .order("lesson_key")
+      .range(from, from + PAGE_SIZE - 1);
+    // PGRST205 (or 42P01 on older projects) means the table does not exist yet.
+    if (error && ["PGRST205", "42P01"].includes(error.code)) {
+      res.status(503).json({
+        error: "Learner progress is not set up in the database yet. Run supabase/003_lesson_progress.sql in the Supabase SQL editor to start saving it.",
+      });
+      return;
+    }
+    if (error) {
+      res.status(500).json({ error: `Lesson progress could not be read. ${error.message}` });
+      return;
+    }
+    progress.push(...data);
+    if (data.length < PAGE_SIZE) break;
+  }
+  res.json({ progress });
+});
+
+// Only full staff choose who else is staff; instructors can look but not change.
+app.put("/api/staff/members/:id/role", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  if (roleOf(req.user) !== "staff") {
+    res.status(403).json({ error: "Only staff accounts can change someone's role." });
+    return;
+  }
+  const role = req.body?.role;
+  if (!ROLES.includes(role)) {
+    res.status(400).json({ error: "Choose member, instructor, or staff." });
+    return;
+  }
+  if (req.params.id === req.user.id) {
+    res.status(400).json({ error: "You cannot change your own role. Ask another staff member to do it." });
+    return;
+  }
+  if (!UUID_PATTERN.test(req.params.id)) {
+    res.status(404).json({ error: "That account was not found." });
+    return;
+  }
+  const { data, error } = await supabaseAdmin.auth.admin.updateUserById(req.params.id, {
+    app_metadata: { role: role === "member" ? null : role },
+  });
+  if (error) {
+    const notFound = error.status === 404;
+    res.status(notFound ? 404 : 500).json({ error: notFound ? "That account was not found." : error.message });
+    return;
+  }
+  res.json({ member: toMember(data.user) });
 });
 
 // Staff are checked before the file is read, so outsiders cannot send large bodies.
