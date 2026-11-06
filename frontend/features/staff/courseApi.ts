@@ -1,13 +1,22 @@
+import { supabase } from "../../supabaseClient";
 import type { CourseResource, StaffCourse } from "./StaffPages";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export type UploadKind = "course-image" | "instructor-image" | "slide" | "video";
 
-async function send(path: string, init: RequestInit) {
+// The backend only accepts changes from a signed-in staff account.
+async function withSignIn(headers: Record<string, string>) {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
+}
+
+async function send(path: string, init: RequestInit & { headers?: Record<string, string> }) {
   let response: Response;
+  const headers = await withSignIn(init.headers ?? {});
   try {
-    response = await fetch(`${API_URL}${path}`, init);
+    response = await fetch(`${API_URL}${path}`, { ...init, headers });
   } catch {
     throw new Error("We could not reach the course service. Check your connection and try again.");
   }

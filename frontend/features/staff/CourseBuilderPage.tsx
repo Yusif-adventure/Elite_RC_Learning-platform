@@ -1,20 +1,24 @@
 import { useState, type DragEvent, type ReactNode } from "react";
+import { CATEGORY_NAMES } from "../../categories";
 import { uploadFile, type UploadKind } from "./courseApi";
 import { StaffButton, StaffShell } from "./StaffPages";
-import type { CourseResource, StaffCourse, StaffPagesProps } from "./StaffPages";
+import type {
+  CourseResource,
+  StaffCourse,
+  StaffPagesProps,
+} from "./StaffPages";
 import "./courseBuilder.css";
 
 const MEGABYTE = 1024 * 1024;
-const MAX_IMAGE_BYTES = 3 * MEGABYTE;
-const MAX_VIDEO_BYTES = 20 * MEGABYTE;
+const MAX_IMAGE_BYTES = 10 * MEGABYTE;
+const MAX_VIDEO_BYTES = 50 * MEGABYTE;
 const MAX_SLIDE_BYTES = 20 * MEGABYTE;
 const IMAGE_TYPES = ".png,.jpg,.jpeg,.webp,.gif";
-const IMAGE_HINT = "PNG, JPG, WEBP or GIF, up to 3 MB";
+const IMAGE_HINT = "PNG, JPG, WEBP or GIF, up to 10 MB";
 const DIFFICULTIES = ["Beginner", "Intermediate", "Advanced"];
-// These match the filters on the Explore Courses page.
-const CATEGORIES = ["RC Planes", "RC Cars", "RC Boats", "Electronics"];
 const DEFAULT_INSTRUCTOR = "ELITE RC Instructor";
-const YOUTUBE_LINK = /^(https?:\/\/)?(www\.|m\.)?(youtube\.com|youtu\.be)\/\S+$/i;
+const YOUTUBE_LINK =
+  /^(https?:\/\/)?(www\.|m\.)?(youtube\.com|youtu\.be)\/\S+$/i;
 
 type LessonDraft = {
   id: number;
@@ -37,7 +41,13 @@ function newDraftId() {
 }
 
 function emptyLesson(): LessonDraft {
-  return { id: newDraftId(), title: "", slides: [], video: undefined, youtubeUrl: "" };
+  return {
+    id: newDraftId(),
+    title: "",
+    slides: [],
+    video: undefined,
+    youtubeUrl: "",
+  };
 }
 
 function emptySection(): SectionDraft {
@@ -65,17 +75,23 @@ function draftsFromCourse(course: StaffCourse): SectionDraft[] {
 function normalizeLink(value: string) {
   const trimmed = value.trim();
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^https?\/\//i.test(trimmed)) return trimmed.replace(/^https?/i, "https:");
+  if (/^https?\/\//i.test(trimmed))
+    return trimmed.replace(/^https?/i, "https:");
   return `https://${trimmed}`;
 }
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Something went wrong. Please try again.";
+  return error instanceof Error
+    ? error.message
+    : "Something went wrong. Please try again.";
 }
 
 function lessonHasContent(lesson: LessonDraft) {
   return Boolean(
-    lesson.title.trim() || lesson.slides.length || lesson.video || lesson.youtubeUrl.trim(),
+    lesson.title.trim() ||
+    lesson.slides.length ||
+    lesson.video ||
+    lesson.youtubeUrl.trim(),
   );
 }
 
@@ -93,7 +109,13 @@ const ICONS = {
   book: "M12 6.5C10.5 5 8 4.5 4 5v14c4-.5 6.5 0 8 1.5m0-14c1.5-1.5 4-2 8-1.5v14c-4-.5-6.5 0-8 1.5m0-14v14",
 };
 
-function FormIcon({ name, size = 18 }: { name: keyof typeof ICONS; size?: number }) {
+function FormIcon({
+  name,
+  size = 18,
+}: {
+  name: keyof typeof ICONS;
+  size?: number;
+}) {
   return (
     <svg
       width={size}
@@ -213,7 +235,9 @@ function FileField({
             void takeFiles(files);
           }}
         />
-        <span className={`file-drop${dragging ? " dragging" : ""}${uploading ? " uploading" : ""}`}>
+        <span
+          className={`file-drop${dragging ? " dragging" : ""}${uploading ? " uploading" : ""}`}
+        >
           <span className="file-drop-icon">
             <FormIcon name="upload" />
           </span>
@@ -222,7 +246,8 @@ function FileField({
               "Uploading..."
             ) : (
               <>
-                Drag {replacing ? "a new file" : multiple ? "files" : "a file"} here or <u>browse</u>
+                Drag {replacing ? "a new file" : multiple ? "files" : "a file"}{" "}
+                here or <u>browse</u>
               </>
             )}
           </span>
@@ -244,13 +269,24 @@ function RemoveButton({
   onClick: () => void;
 }) {
   return (
-    <button type="button" className="form-remove" aria-label={label} onClick={onClick}>
+    <button
+      type="button"
+      className="form-remove"
+      aria-label={label}
+      onClick={onClick}
+    >
       {children}
     </button>
   );
 }
 
-function FileRow({ file, onRemove }: { file: CourseResource; onRemove: () => void }) {
+function FileRow({
+  file,
+  onRemove,
+}: {
+  file: CourseResource;
+  onRemove: () => void;
+}) {
   return (
     <div className="file-row">
       <FormIcon name="file" />
@@ -292,13 +328,20 @@ function CoursePreview({
       <span className="eyebrow">LEARNER PREVIEW</span>
       <article className="course-card">
         <div className="course-image">
-          {image ? <img src={image} alt="" /> : <div className="form-cover-empty">Course image</div>}
+          {image ? (
+            <img src={image} alt="" />
+          ) : (
+            <div className="form-cover-empty">Course image</div>
+          )}
           <span className="badge">{difficulty}</span>
         </div>
         <div className="course-body">
           <span className="category">{category || "Category"}</span>
           <h3>{title.trim() || "Your course title"}</h3>
-          <p>{description.trim() || "A short description of what learners will achieve."}</p>
+          <p>
+            {description.trim() ||
+              "A short description of what learners will achieve."}
+          </p>
           <div className="course-meta">
             <span>
               <FormIcon name="user" size={15} />
@@ -339,11 +382,15 @@ export function CourseBuilderPage({
 }: StaffPagesProps) {
   const [title, setTitle] = useState(editingCourse?.title ?? "");
   const [description, setDescription] = useState(editingCourse?.desc ?? "");
-  const [difficulty, setDifficulty] = useState(editingCourse?.level ?? "Beginner");
+  const [difficulty, setDifficulty] = useState(
+    editingCourse?.level ?? "Beginner",
+  );
   const [category, setCategory] = useState(editingCourse?.category ?? "");
   const [duration, setDuration] = useState(editingCourse?.duration ?? "");
   const [instructor, setInstructor] = useState(editingCourse?.instructor ?? "");
-  const [instructorImage, setInstructorImage] = useState(editingCourse?.instructorImage ?? "");
+  const [instructorImage, setInstructorImage] = useState(
+    editingCourse?.instructorImage ?? "",
+  );
   const [courseImage, setCourseImage] = useState(editingCourse?.image ?? "");
   const [learningPoints, setLearningPoints] = useState<string[]>(
     editingCourse?.objectives.length ? editingCourse.objectives : [""],
@@ -359,23 +406,39 @@ export function CourseBuilderPage({
   const allLessons = sections.flatMap((section) => section.lessons);
   const titledLessons = allLessons.filter((lesson) => lesson.title.trim());
   const fileCount =
-    allLessons.reduce((count, lesson) => count + lesson.slides.length + (lesson.video ? 1 : 0), 0) +
+    allLessons.reduce(
+      (count, lesson) => count + lesson.slides.length + (lesson.video ? 1 : 0),
+      0,
+    ) +
     (courseImage ? 1 : 0) +
     (instructorImage ? 1 : 0);
   const categories = [
-    ...new Set([...CATEGORIES, ...(editingCourse?.category ? [editingCourse.category] : [])]),
+    ...new Set([
+      ...CATEGORY_NAMES,
+      ...(editingCourse?.category ? [editingCourse.category] : []),
+    ]),
   ];
   const sampleImage =
-    courses.find((course) => course.image && course.id !== editingCourse?.id)?.image ?? "";
+    courses.find((course) => course.image && course.id !== editingCourse?.id)
+      ?.image ?? "";
   const coverImage = courseImage || sampleImage;
 
   const findProblem = () => {
     if (!title.trim()) return "Add a course title before saving.";
     if (!category) return "Choose a category before saving.";
-    if (sections.some((section) => !section.title.trim() && section.lessons.some(lessonHasContent))) {
+    if (
+      sections.some(
+        (section) =>
+          !section.title.trim() && section.lessons.some(lessonHasContent),
+      )
+    ) {
       return "Give every section that has lessons a title before saving.";
     }
-    if (allLessons.some((lesson) => !lesson.title.trim() && lessonHasContent(lesson))) {
+    if (
+      allLessons.some(
+        (lesson) => !lesson.title.trim() && lessonHasContent(lesson),
+      )
+    ) {
       return "Give every lesson that has files or a video a title before saving.";
     }
     if (allLessons.some(lessonHasBadLink)) {
@@ -385,9 +448,16 @@ export function CourseBuilderPage({
   };
   const message = error || (showProblems ? findProblem() : "");
 
-  const uploadFiles = async (files: File[], kind: UploadKind, maxBytes: number, label: string) => {
+  const uploadFiles = async (
+    files: File[],
+    kind: UploadKind,
+    maxBytes: number,
+    label: string,
+  ) => {
     if (files.some((file) => file.size > maxBytes)) {
-      setError(`${label} is too large. Choose a file up to ${maxBytes / MEGABYTE} MB.`);
+      setError(
+        `${label} is too large. Choose a file up to ${maxBytes / MEGABYTE} MB.`,
+      );
       return null;
     }
     setError("");
@@ -404,9 +474,14 @@ export function CourseBuilderPage({
 
   const updateSection = (sectionId: number, update: Partial<SectionDraft>) =>
     setSections((current) =>
-      current.map((section) => (section.id === sectionId ? { ...section, ...update } : section)),
+      current.map((section) =>
+        section.id === sectionId ? { ...section, ...update } : section,
+      ),
     );
-  const updateLesson = (lessonId: number, update: (lesson: LessonDraft) => Partial<LessonDraft>) =>
+  const updateLesson = (
+    lessonId: number,
+    update: (lesson: LessonDraft) => Partial<LessonDraft>,
+  ) =>
     setSections((current) =>
       current.map((section) => ({
         ...section,
@@ -424,7 +499,10 @@ export function CourseBuilderPage({
       ),
     );
   const removeLesson = (lesson: LessonDraft) => {
-    if (lessonHasContent(lesson) && !window.confirm("Remove this lesson and its files from the course?")) {
+    if (
+      lessonHasContent(lesson) &&
+      !window.confirm("Remove this lesson and its files from the course?")
+    ) {
       return;
     }
     setSections((current) =>
@@ -435,8 +513,14 @@ export function CourseBuilderPage({
     );
   };
   const removeSection = (section: SectionDraft) => {
-    const hasContent = section.title.trim() || section.lessons.some(lessonHasContent);
-    if (hasContent && !window.confirm("Remove this section and all of its lessons from the course?")) {
+    const hasContent =
+      section.title.trim() || section.lessons.some(lessonHasContent);
+    if (
+      hasContent &&
+      !window.confirm(
+        "Remove this section and all of its lessons from the course?",
+      )
+    ) {
       return;
     }
     setSections((current) => current.filter((item) => item.id !== section.id));
@@ -465,7 +549,9 @@ export function CourseBuilderPage({
             section: section.title.trim(),
             slides: lesson.slides,
             video: lesson.video,
-            youtubeUrl: lesson.youtubeUrl.trim() ? normalizeLink(lesson.youtubeUrl) : undefined,
+            youtubeUrl: lesson.youtubeUrl.trim()
+              ? normalizeLink(lesson.youtubeUrl)
+              : undefined,
           })),
       ),
     };
@@ -519,7 +605,9 @@ export function CourseBuilderPage({
             <div className="form-fields">
               <Field label="Course title" required>
                 <input
-                  className={showProblems && !title.trim() ? "invalid" : undefined}
+                  className={
+                    showProblems && !title.trim() ? "invalid" : undefined
+                  }
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
                   placeholder="e.g. Advanced Flight Tuning"
@@ -537,7 +625,9 @@ export function CourseBuilderPage({
               <div className="form-row">
                 <Field label="Category" required>
                   <select
-                    className={showProblems && !category ? "invalid" : undefined}
+                    className={
+                      showProblems && !category ? "invalid" : undefined
+                    }
                     value={category}
                     onChange={(event) => setCategory(event.target.value)}
                     required
@@ -551,7 +641,10 @@ export function CourseBuilderPage({
                   </select>
                 </Field>
                 <Field label="Difficulty">
-                  <select value={difficulty} onChange={(event) => setDifficulty(event.target.value)}>
+                  <select
+                    value={difficulty}
+                    onChange={(event) => setDifficulty(event.target.value)}
+                  >
                     {DIFFICULTIES.map((option) => (
                       <option key={option}>{option}</option>
                     ))}
@@ -565,7 +658,10 @@ export function CourseBuilderPage({
                   />
                 </Field>
               </div>
-              <Field label="Course instructor" hint={`Leave blank to show ${DEFAULT_INSTRUCTOR}`}>
+              <Field
+                label="Course instructor"
+                hint={`Leave blank to show ${DEFAULT_INSTRUCTOR}`}
+              >
                 <input
                   value={instructor}
                   onChange={(event) => setInstructor(event.target.value)}
@@ -579,14 +675,21 @@ export function CourseBuilderPage({
                   accept={IMAGE_TYPES}
                   replacing={Boolean(courseImage)}
                   onFiles={async (files) => {
-                    const uploaded = await uploadFiles(files, "course-image", MAX_IMAGE_BYTES, "Course image");
+                    const uploaded = await uploadFiles(
+                      files,
+                      "course-image",
+                      MAX_IMAGE_BYTES,
+                      "Course image",
+                    );
                     if (uploaded) setCourseImage(uploaded[0].url);
                   }}
                 >
                   {courseImage && (
                     <div className="image-preview">
                       <img src={courseImage} alt="Course image preview" />
-                      <RemoveButton onClick={() => setCourseImage("")}>Remove image</RemoveButton>
+                      <RemoveButton onClick={() => setCourseImage("")}>
+                        Remove image
+                      </RemoveButton>
                     </div>
                   )}
                 </FileField>
@@ -596,14 +699,24 @@ export function CourseBuilderPage({
                   accept={IMAGE_TYPES}
                   replacing={Boolean(instructorImage)}
                   onFiles={async (files) => {
-                    const uploaded = await uploadFiles(files, "instructor-image", MAX_IMAGE_BYTES, "Instructor photo");
+                    const uploaded = await uploadFiles(
+                      files,
+                      "instructor-image",
+                      MAX_IMAGE_BYTES,
+                      "Instructor photo",
+                    );
                     if (uploaded) setInstructorImage(uploaded[0].url);
                   }}
                 >
                   {instructorImage && (
                     <div className="image-preview round">
-                      <img src={instructorImage} alt="Instructor photo preview" />
-                      <RemoveButton onClick={() => setInstructorImage("")}>Remove photo</RemoveButton>
+                      <img
+                        src={instructorImage}
+                        alt="Instructor photo preview"
+                      />
+                      <RemoveButton onClick={() => setInstructorImage("")}>
+                        Remove photo
+                      </RemoveButton>
                     </div>
                   )}
                 </FileField>
@@ -628,7 +741,9 @@ export function CourseBuilderPage({
                     value={point}
                     onChange={(event) =>
                       setLearningPoints((points) =>
-                        points.map((item, itemIndex) => (itemIndex === index ? event.target.value : item)),
+                        points.map((item, itemIndex) =>
+                          itemIndex === index ? event.target.value : item,
+                        ),
                       )
                     }
                     placeholder="e.g. Configure a safe RC aircraft power system"
@@ -637,7 +752,9 @@ export function CourseBuilderPage({
                     <RemoveButton
                       label={`Remove outcome ${index + 1}`}
                       onClick={() =>
-                        setLearningPoints((points) => points.filter((_, itemIndex) => itemIndex !== index))
+                        setLearningPoints((points) =>
+                          points.filter((_, itemIndex) => itemIndex !== index),
+                        )
                       }
                     >
                       <FormIcon name="close" size={16} />
@@ -666,17 +783,23 @@ export function CourseBuilderPage({
                 <div className="curriculum-builder-section" key={section.id}>
                   <div className="form-group-head">
                     <span className="badge">SECTION {sectionIndex + 1}</span>
-                    <RemoveButton onClick={() => removeSection(section)}>Remove section</RemoveButton>
+                    <RemoveButton onClick={() => removeSection(section)}>
+                      Remove section
+                    </RemoveButton>
                   </div>
                   <Field label={`Section ${sectionIndex + 1} title`} required>
                     <input
                       className={
-                        showProblems && !section.title.trim() && section.lessons.some(lessonHasContent)
+                        showProblems &&
+                        !section.title.trim() &&
+                        section.lessons.some(lessonHasContent)
                           ? "invalid"
                           : undefined
                       }
                       value={section.title}
-                      onChange={(event) => updateSection(section.id, { title: event.target.value })}
+                      onChange={(event) =>
+                        updateSection(section.id, { title: event.target.value })
+                      }
                       placeholder="e.g. Electronics and control systems"
                     />
                   </Field>
@@ -684,12 +807,16 @@ export function CourseBuilderPage({
                     <div className="lesson-builder-card" key={lesson.id}>
                       <div className="form-group-head">
                         <b>Lesson {lessonIndex + 1}</b>
-                        <RemoveButton onClick={() => removeLesson(lesson)}>Remove lesson</RemoveButton>
+                        <RemoveButton onClick={() => removeLesson(lesson)}>
+                          Remove lesson
+                        </RemoveButton>
                       </div>
                       <Field label={`Lesson ${lessonIndex + 1} title`} required>
                         <input
                           className={
-                            showProblems && !lesson.title.trim() && lessonHasContent(lesson)
+                            showProblems &&
+                            !lesson.title.trim() &&
+                            lessonHasContent(lesson)
                               ? "invalid"
                               : undefined
                           }
@@ -708,7 +835,12 @@ export function CourseBuilderPage({
                           accept=".pdf,.ppt,.pptx,.key"
                           multiple
                           onFiles={async (files) => {
-                            const uploaded = await uploadFiles(files, "slide", MAX_SLIDE_BYTES, "Slide file");
+                            const uploaded = await uploadFiles(
+                              files,
+                              "slide",
+                              MAX_SLIDE_BYTES,
+                              "Slide file",
+                            );
                             if (uploaded) {
                               updateLesson(lesson.id, (current) => ({
                                 slides: [...current.slides, ...uploaded],
@@ -722,7 +854,9 @@ export function CourseBuilderPage({
                               file={slide}
                               onRemove={() =>
                                 updateLesson(lesson.id, (current) => ({
-                                  slides: current.slides.filter((_, index) => index !== slideIndex),
+                                  slides: current.slides.filter(
+                                    (_, index) => index !== slideIndex,
+                                  ),
                                 }))
                               }
                             />
@@ -730,20 +864,37 @@ export function CourseBuilderPage({
                         </FileField>
                         <FileField
                           label="Short video preview"
-                          hint="MP4 plays best, up to 20 MB"
+                          hint="MP4 plays best, up to 50 MB"
                           accept=".mp4,.webm,.mov"
                           replacing={Boolean(lesson.video)}
                           onFiles={async (files) => {
-                            const uploaded = await uploadFiles(files, "video", MAX_VIDEO_BYTES, "Video preview");
-                            if (uploaded) updateLesson(lesson.id, () => ({ video: uploaded[0] }));
+                            const uploaded = await uploadFiles(
+                              files,
+                              "video",
+                              MAX_VIDEO_BYTES,
+                              "Video preview",
+                            );
+                            if (uploaded)
+                              updateLesson(lesson.id, () => ({
+                                video: uploaded[0],
+                              }));
                           }}
                         >
                           {lesson.video && (
                             <>
-                              <video className="form-video" controls preload="metadata" src={lesson.video.url} />
+                              <video
+                                className="form-video"
+                                controls
+                                preload="metadata"
+                                src={lesson.video.url}
+                              />
                               <FileRow
                                 file={lesson.video}
-                                onRemove={() => updateLesson(lesson.id, () => ({ video: undefined }))}
+                                onRemove={() =>
+                                  updateLesson(lesson.id, () => ({
+                                    video: undefined,
+                                  }))
+                                }
                               />
                             </>
                           )}
@@ -754,19 +905,29 @@ export function CourseBuilderPage({
                         hint="Learners watch the short preview first, then open this link for the full lesson."
                       >
                         <input
-                          className={showProblems && lessonHasBadLink(lesson) ? "invalid" : undefined}
+                          className={
+                            showProblems && lessonHasBadLink(lesson)
+                              ? "invalid"
+                              : undefined
+                          }
                           type="url"
                           value={lesson.youtubeUrl}
                           onChange={(event) => {
                             const value = event.target.value;
-                            updateLesson(lesson.id, () => ({ youtubeUrl: value }));
+                            updateLesson(lesson.id, () => ({
+                              youtubeUrl: value,
+                            }));
                           }}
                           placeholder="https://www.youtube.com/watch?v=..."
                         />
                       </Field>
                     </div>
                   ))}
-                  <button type="button" className="form-add" onClick={() => addLesson(section.id)}>
+                  <button
+                    type="button"
+                    className="form-add"
+                    onClick={() => addLesson(section.id)}
+                  >
                     + Add lesson to section
                   </button>
                 </div>
@@ -774,7 +935,9 @@ export function CourseBuilderPage({
               <button
                 type="button"
                 className="form-add strong"
-                onClick={() => setSections((current) => [...current, emptySection()])}
+                onClick={() =>
+                  setSections((current) => [...current, emptySection()])
+                }
               >
                 + Add section
               </button>
@@ -788,13 +951,26 @@ export function CourseBuilderPage({
                   {message}
                 </span>
               ) : uploadsInProgress > 0 ? (
-                <span role="status">Uploading files. You can save when they finish.</span>
+                <span role="status">
+                  Uploading files. You can save when they finish.
+                </span>
               ) : (
-                <span>{title.trim() && category ? "Ready to save" : "Fields marked * are required"}</span>
+                <span>
+                  {title.trim() && category
+                    ? "Ready to save"
+                    : "Fields marked * are required"}
+                </span>
               )}
             </div>
-            <StaffButton disabled={saving || uploadsInProgress > 0} onClick={saveCourse}>
-              {saving ? "Saving..." : editingCourse ? "Save changes" : "Save course"}
+            <StaffButton
+              disabled={saving || uploadsInProgress > 0}
+              onClick={saveCourse}
+            >
+              {saving
+                ? "Saving..."
+                : editingCourse
+                  ? "Save changes"
+                  : "Save course"}
             </StaffButton>
           </div>
         </div>

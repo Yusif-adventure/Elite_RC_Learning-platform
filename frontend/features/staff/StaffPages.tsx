@@ -1,6 +1,16 @@
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
+import { courseImageProps } from "../../imageFallback";
 
-type StaffPage = "admin" | "builder" | "preview" | "instructor";
+type StaffPage = "admin" | "builder" | "instructor" | "course";
+
+// The signed-in staff member, shown in the staff sidebar.
+export type StaffAccount = {
+  name: string;
+  initials: string;
+  onViewSite: () => void;
+  onSignOut: () => void;
+};
+export const StaffAccountContext = createContext<StaffAccount | null>(null);
 
 export type CourseResource = {
   name: string;
@@ -67,6 +77,7 @@ export function StaffShell({
   onNavigate: StaffPagesProps["onNavigate"];
 }) {
   const [open, setOpen] = useState(false);
+  const account = useContext(StaffAccountContext);
   const nav: [StaffPage, string, string][] = [
     ["admin", "Overview", "Manage the learning hub"],
     ["instructor", "Instructor workspace", "Create and teach courses"],
@@ -100,13 +111,27 @@ export function StaffShell({
             </button>
           ))}
         </nav>
-        <div className="side-user">
-          <span>AK</span>
-          <div>
-            <b>Ama Kusi</b>
-            <small>Staff administrator</small>
-          </div>
-        </div>
+        {account && (
+          <>
+            <nav className="side-account">
+              <button onClick={account.onViewSite}>
+                <span aria-hidden="true">←</span>
+                View learner site
+              </button>
+              <button onClick={account.onSignOut}>
+                <span aria-hidden="true">⎋</span>
+                Sign out
+              </button>
+            </nav>
+            <div className="side-user">
+              <span>{account.initials}</span>
+              <div>
+                <b>{account.name}</b>
+                <small>Staff</small>
+              </div>
+            </div>
+          </>
+        )}
       </aside>
       <div className="workspace">
         <header className="app-top">
@@ -118,7 +143,7 @@ export function StaffShell({
             Staff tools
           </div>
           <button className="top-profile" onClick={() => onNavigate("admin")}>
-            AK
+            {account?.initials}
           </button>
         </header>
         <main className="workspace-main">{children}</main>
@@ -147,8 +172,8 @@ export function StaffOverview({
       <section className="panel">
         <div className="panel-head">
           <div>
-            <h2>Course management</h2>
-            <p>Review published content and assign instructor ownership.</p>
+            <h2>Published courses</h2>
+            <p>Everything learners can see right now.</p>
           </div>
           <StaffButton
             variant="outline"
@@ -159,13 +184,20 @@ export function StaffOverview({
         </div>
         {courses.map((course) => (
           <div className="skill-row" key={course.title}>
-            <img src={course.image} alt="" />
+            <img {...courseImageProps(course.image)} alt="" />
             <div>
               <b>{course.title}</b>
               <span>
-                {course.category} · {course.level} · {course.lessons} lessons
+                {course.category} · {course.level} · {course.lessons}{" "}
+                {course.lessons === 1 ? "lesson" : "lessons"}
               </span>
             </div>
+            <StaffButton
+              variant="outline"
+              onClick={() => onNavigate("course", course)}
+            >
+              View
+            </StaffButton>
             <StaffButton
               variant="outline"
               onClick={() => onNavigate("builder", course)}
@@ -203,7 +235,7 @@ export function InstructorWorkspace({
           <p>Organize your curriculum and keep every practical lesson moving.</p>
         </div>
         <StaffButton onClick={() => onNavigate("builder")}>
-          Create lesson plan
+          Create course
         </StaffButton>
       </div>
       <section className="panel">
@@ -224,7 +256,7 @@ export function InstructorWorkspace({
         </div>
         {assignedCourses.map((course) => (
           <div className="skill-row" key={course.title}>
-            <img src={course.image} alt="" />
+            <img {...courseImageProps(course.image)} alt="" />
             <div>
               <b>{course.title}</b>
               <span>
@@ -233,55 +265,21 @@ export function InstructorWorkspace({
             </div>
             <StaffButton
               variant="outline"
+              onClick={() => onNavigate("course", course)}
+            >
+              View
+            </StaffButton>
+            <StaffButton
+              variant="outline"
               onClick={() => onNavigate("builder", course)}
             >
-              Edit course
+              Edit
             </StaffButton>
             <StaffButton variant="outline" onClick={() => onDeleteCourse(course)}>
               Delete
             </StaffButton>
           </div>
         ))}
-      </section>
-    </StaffShell>
-  );
-}
-
-export function StaffCoursePreview({
-  course,
-  onNavigate,
-}: {
-  course: StaffCourse;
-  onNavigate: StaffPagesProps["onNavigate"];
-}) {
-  return (
-    <StaffShell active="preview" onNavigate={onNavigate}>
-      <div className="page-title">
-        <div>
-          <span className="eyebrow">COURSE PREVIEW</span>
-          <h1>{course.title}</h1>
-          <p>Review the student-facing experience before publishing.</p>
-        </div>
-        <StaffButton variant="outline" onClick={() => onNavigate("admin")}>
-          Back to courses
-        </StaffButton>
-      </div>
-      <section className="panel preview-panel">
-        <img src={course.image} alt="" />
-        <div>
-          <span className="badge">{course.level}</span>
-          <h2>{course.title}</h2>
-          <p>{course.desc}</p>
-          <p>
-            <b>Instructor:</b> {course.instructor}
-          </p>
-          <h3>Curriculum</h3>
-          <ul>
-            {course.sections.map((section) => (
-              <li key={section}>{section}</li>
-            ))}
-          </ul>
-        </div>
       </section>
     </StaffShell>
   );

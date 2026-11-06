@@ -16,9 +16,10 @@ The project currently contains:
 - A production frontend build that completes successfully
 
 Courses, lessons, and uploaded files are stored in Supabase and reached through
-the backend, so every browser sees the same courses. Sign-in and staff
-protection are not connected yet, so do not share the backend URL until they
-are.
+the backend, so every browser sees the same courses. Members sign in with
+Supabase Auth. Only staff accounts can create, edit, or delete courses or
+upload files: the backend checks every such request (see
+[Staff access](#staff-access)).
 
 ## Friday shared-pilot release plan
 
@@ -46,13 +47,9 @@ already stable.
 
 ### Current launch blockers
 
-- Courses are stored in browser `localStorage`, so members will not see the
-  same courses across devices.
-- The backend currently provides only health, status, and course-listing
-  endpoints.
-- Sign-in is currently a placeholder and does not authenticate users.
-- Instructor access is currently unrestricted.
 - Production deployment configuration is not complete.
+- Staff accounts must be granted in Supabase before launch (see
+  [Staff access](#staff-access)).
 
 ### Week-of-release focus
 
@@ -123,15 +120,22 @@ next release.
   - Instructor name and profile image
   - Learning objectives
   - Sections and lessons
-- Start a lesson from its overview page
+- Start a lesson from its overview page, which lists what the lesson includes
 - Open uploaded slide resources
 - Watch an uploaded short video preview
 - Open the full lesson video on YouTube
-- View learning progress and profile screens
+- Move to the next or previous lesson
+- Mark lessons complete, see progress on each course, and continue where they
+  left off (needs [`supabase/003_lesson_progress.sql`](./supabase/003_lesson_progress.sql))
+- See every started course on **My learning**
+- Change their name and password on the profile page
+- Use the browser's Back button, refresh, and share links: every page has its
+  own address, such as `/courses/<id>/lessons/2`
 
 ### Instructor and staff experience
 
-- Enter the Instructor Workspace from the sign-in screen
+- Sign in with a staff account to land in the Staff Workspace, or open it from
+  the **Staff Workspace** link, which only staff see
 - View course assignments and course management screens
 - Create a course with:
   - Course title
@@ -205,8 +209,8 @@ development.
 1. Files are uploaded through the backend, which stores them in Supabase
    Storage.
 2. Upload limits, checked in the browser and on the backend:
-   - Video previews: 5 MB
-   - Course and instructor images: 3 MB
+   - Video previews: 50 MB, the largest single file the Supabase project accepts
+   - Course and instructor images: 10 MB
    - Slide files: 20 MB
 3. Large media files must be stored in object/blob storage rather than browser
    local storage or a relational database record.
@@ -236,6 +240,12 @@ src/
 
 - [`frontend/App.tsx`](./frontend/App.tsx): public pages, navigation,
   course state, and lesson rendering.
+- [`frontend/routes.ts`](./frontend/routes.ts): the address of every page.
+- [`frontend/categories.ts`](./frontend/categories.ts): the one list of course
+  categories used by the home page, the catalog, and the course builder.
+- [`frontend/progress.ts`](./frontend/progress.ts) and
+  [`progressApi.ts`](./frontend/progressApi.ts): working out and saving lesson
+  progress.
 - [`frontend/features/staff/courseApi.ts`](./frontend/features/staff/courseApi.ts):
   requests that save courses and upload files.
 - [`frontend/features/staff/StaffPages.tsx`](./frontend/features/staff/StaffPages.tsx):
@@ -254,6 +264,11 @@ src/
   variable names.
 - [`supabase/001_shared_course_data.sql`](./supabase/001_shared_course_data.sql):
   database tables, seed courses, indexes, and storage buckets.
+- [`supabase/002_staff_access.sql`](./supabase/002_staff_access.sql):
+  row-level security, and how to grant or remove staff access.
+- [`supabase/003_lesson_progress.sql`](./supabase/003_lesson_progress.sql):
+  the table of completed lessons, which each member can only see and change for
+  themselves.
 
 ## Running the project
 
@@ -276,6 +291,19 @@ To create a production build:
 ```powershell
 npm run build
 ```
+
+To run the frontend tests (Node 22.18 or later runs them directly):
+
+```powershell
+npm test
+```
+
+Every page has its own address, such as `/courses/<id>`. When the built site is
+hosted, the host must answer any address that is not a file with `index.html`,
+or opening a shared link or refreshing a page shows the host's "not found"
+page. Most hosts call this a single-page app or SPA rewrite: for example a
+`_redirects` file with `/* /index.html 200` on Netlify, or a rewrite of
+`/(.*)` to `/index.html` in `vercel.json` on Vercel.
 
 ### Backend
 
@@ -303,10 +331,12 @@ access to the Supabase project, so keep it only in the backend's environment and
 never put it in the frontend, a chat, or Git. Without it, courses can still be
 read, but saving and uploads return a clear error.
 
-The frontend reads shared courses from the backend API. For local development,
-the default API URL is `http://localhost:5000`. To use another backend URL,
-create `frontend/.env` from [`frontend/.env.example`](./frontend/.env.example)
-and set `VITE_API_URL`.
+The frontend needs `frontend/.env`, created from
+[`frontend/.env.example`](./frontend/.env.example), or it will not load. Set
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to the same project URL and
+anon key as the backend, and `VITE_API_URL` to the backend URL
+(`http://localhost:5000` for local development). Never put the service role key
+in the frontend.
 
 The backend exposes:
 
@@ -314,24 +344,67 @@ The backend exposes:
 - `GET /api/status`
 - `GET /api/courses`
 - `GET /api/courses/:id`
-- `POST /api/courses`
-- `PUT /api/courses/:id`
-- `DELETE /api/courses/:id`
-- `POST /api/uploads`
+- `POST /api/courses` (staff only)
+- `PUT /api/courses/:id` (staff only)
+- `DELETE /api/courses/:id` (staff only)
+- `POST /api/uploads` (staff only)
+
+Staff-only endpoints need an `Authorization: Bearer <access token>` header
+from a signed-in Supabase session. The frontend sends it automatically. Without
+a sign-in they answer `401`; with a member's sign-in they answer `403`.
 
 ### Supabase setup
 
 1. Create a Supabase project.
 2. Open the Supabase SQL Editor.
 3. Run [`supabase/001_shared_course_data.sql`](./supabase/001_shared_course_data.sql).
-4. Copy the project URL, anon key, and service role key into `backend/.env`.
-5. Start the backend and verify `GET http://localhost:5000/api/status`.
+4. Run [`supabase/002_staff_access.sql`](./supabase/002_staff_access.sql).
+5. Run [`supabase/003_lesson_progress.sql`](./supabase/003_lesson_progress.sql).
+   Until it is run, the app still works but does not save lesson progress, and
+   **My learning** says progress tracking is not switched on yet.
+6. Copy the project URL, anon key, and service role key into `backend/.env`,
+   and the URL and anon key into `frontend/.env`.
+7. Start the backend and verify `GET http://localhost:5000/api/status`.
+8. Make at least one staff account (see [Staff access](#staff-access)).
 
-The migration creates normalized course, objective, section, lesson, and
+The first migration creates normalized course, objective, section, lesson, and
 resource tables. It also seeds two courses and creates public-read storage
-buckets for course images, instructor images, and lesson resources. Upload
-permissions and authenticated write access should be added with the
-authentication work before production release.
+buckets for course images, instructor images, and lesson resources. The second
+turns on row-level security so the anon key, which every browser has, can read
+published courses but cannot change anything. The third stores which lessons
+each member has completed. The browser reads and writes it directly with the
+member's own sign-in, and row-level security keeps every member to their own
+rows. Lessons are identified by section and title, because saving a course
+replaces its lessons, so renaming a lesson resets its progress.
+
+### Staff access
+
+Staff are marked with `"role": "staff"` in a Supabase user's `app_metadata`.
+Members cannot edit `app_metadata` themselves. (They can edit
+`user_metadata`, so that is never trusted.) For now one staff role covers both
+staff and instructors, and staff can manage every course.
+
+To make someone staff:
+
+1. They sign up in the app with their email address.
+2. In the Supabase SQL Editor, run:
+
+   ```sql
+   update auth.users
+   set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role": "staff"}'::jsonb
+   where email = 'person@example.com';
+   ```
+
+3. They sign out and sign back in. Their browser only learns about the new role
+   on a fresh sign-in, but the backend sees it immediately.
+
+[`supabase/002_staff_access.sql`](./supabase/002_staff_access.sql) also shows
+how to list staff and how to remove staff access.
+
+Hiding the staff pages in the browser is only for clarity. The protection is
+the backend, which checks the sign-in with Supabase before every create, edit,
+delete, or upload, and records which staff member created each course in
+`courses.created_by`.
 
 ## Planned database integration
 
@@ -358,21 +431,16 @@ production use.
 
 ### Authentication and authorization
 
-- Replace the current prototype sign-in screen with real authentication.
-- Add Supabase Auth or another managed authentication provider.
-- Support email/password sign-up and sign-in.
-- Add email verification and password reset.
-- Add sign-out and session persistence.
-- Protect instructor and staff routes from unauthenticated users.
-- Add role-based access control for:
-  - Learners
-  - Instructors
-  - Staff administrators
-- Ensure instructors can edit only courses they own unless they are staff
-  administrators.
-- Ensure only authorized users can upload, update, or delete course content.
-- Add protected backend endpoints that validate the authenticated user rather
-  than trusting data from the browser.
+Done: Supabase email/password sign-up, sign-in, email verification, password
+reset, sign-out, and session persistence; staff-only pages; backend checks that
+only staff can upload, create, update, or delete course content.
+
+Still to do:
+
+- Separate instructor and staff administrator roles, so instructors can edit
+  only courses they own (`courses.created_by` is already recorded).
+- A staff screen for granting staff access, instead of the SQL in
+  [Staff access](#staff-access).
 
 ### Backend and database integration
 
@@ -405,7 +473,7 @@ production use.
 - Configure access policies for private instructor resources.
 - Generate signed URLs where resources should not be public.
 - Add video processing or transcoding for browser-compatible playback.
-- Support larger video files after moving away from browser local storage.
+- Support video files over 50 MB, which is the Supabase project's limit today.
 
 ### Course publishing workflow
 
@@ -424,15 +492,14 @@ production use.
 
 ### Learner accounts and progress
 
-- Associate learner progress with authenticated users.
-- Save completed lessons to the database.
-- Track course enrollment.
-- Track course completion percentage.
-- Add resume-learning behavior.
+Done: completed lessons saved per member, course completion percentage,
+continue where you left off, real profile data, and changing name and
+password.
+
+Still to do:
+
 - Add completion certificates or achievements if required.
-- Replace the current placeholder profile data with the authenticated user's
-  profile.
-- Allow users to update their name, profile image, and account details.
+- Allow members to add a profile image and change their email address.
 
 ### Instructor profile management
 
@@ -536,6 +603,43 @@ cd backend
 npm test
 ```
 
-There are currently no repository-level automated frontend tests. The main
-validation is the production build and manual browser testing of the learner
-and staff flows.
+The frontend has unit tests for page addresses, categories, and progress
+(`cd frontend` then `npm test`). Pages themselves are checked with the
+production build and browser testing of the learner and staff flows.
+
+On November 3, these were checked in Edge against the real Supabase project, at
+1366px, 390px, and 360px widths:
+
+- Learner path: home, catalog, course page, choosing a lesson in a later
+  section, lesson overview, starting the lesson, slides, video preview, and
+  YouTube link.
+- No page scrolls sideways at any of the three widths.
+- Every course image, instructor photo, slide, video, and YouTube link in the
+  live courses responds.
+- Pages show a placeholder instead of a broken image when an image is missing
+  or its link fails.
+- A member can sign in but sees no staff links, and the backend refuses the
+  member's course changes with `403`.
+- Staff land in the Staff Workspace after signing in, see their own name, and
+  can sign out.
+- Wrong file types, empty files, and oversized files are refused with a clear
+  message, and nothing reaches storage.
+
+These were also checked in Edge on the same day after the page and progress
+work:
+
+- Opening a course or lesson link directly, Back, Forward, and refresh all keep
+  the right page; unknown courses, lessons, and addresses show a clear "not
+  found" page.
+- Home page category tiles open the catalog filtered to that category, and
+  empty categories say "Coming soon".
+- Next and Previous lesson, and the last lesson's Finish course.
+- With progress on: Complete & continue, the course page's progress bar and
+  Continue learning, the dashboard, **My learning**, and Mark as not done. These
+  ran with the progress table simulated in the browser, because
+  `003_lesson_progress.sql` had not been run yet; check them again for real once
+  it has.
+- With progress off (the real database at the time): no errors, and the pages
+  fall back to their earlier content.
+- Signing in from a lesson returns to that lesson.
+- Changing name and password, then signing in with the new password.

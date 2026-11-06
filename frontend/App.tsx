@@ -1,26 +1,35 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { courseImageProps, personImageProps } from "./imageFallback";
+import type { User } from "@supabase/supabase-js";
 import {
   InstructorWorkspace,
-  StaffCoursePreview,
+  StaffAccountContext,
   StaffOverview,
 } from "./features/staff/StaffPages";
 import { CourseBuilderPage } from "./features/staff/CourseBuilderPage";
 import type { CourseResource, StaffCourse } from "./features/staff/StaffPages";
-import { API_URL, createCourse, removeCourse, updateCourse } from "./features/staff/courseApi";
+import {
+  API_URL,
+  createCourse,
+  removeCourse,
+  updateCourse,
+} from "./features/staff/courseApi";
+import { supabase } from "./supabaseClient";
+import { parsePath, parseRoute, routePath, type Page, type Route } from "./routes";
+import { CATEGORIES, catalogCategories } from "./categories";
+import {
+  courseProgress,
+  coursesInProgress,
+  lessonKey,
+  type ProgressRow,
+} from "./progress";
+import {
+  loadProgress,
+  markLessonComplete,
+  markLessonNotDone,
+  type ProgressState,
+} from "./progressApi";
 
-type Page =
-  | "home"
-  | "explore"
-  | "course"
-  | "dashboard"
-  | "lesson"
-  | "progress"
-  | "admin"
-  | "builder"
-  | "preview"
-  | "instructor"
-  | "auth"
-  | "profile";
 type IconName =
   | "plane"
   | "search"
@@ -355,15 +364,21 @@ function Button({
   icon,
   onClick,
   className = "",
+  disabled = false,
 }: {
   children: ReactNode;
   variant?: "primary" | "outline" | "ghost" | "danger";
   icon?: IconName;
   onClick?: () => void;
   className?: string;
+  disabled?: boolean;
 }) {
   return (
-    <button className={`btn ${variant} ${className}`} onClick={onClick}>
+    <button
+      className={`btn ${variant} ${className}`}
+      onClick={onClick}
+      disabled={disabled}
+    >
       {icon && <Icon name={icon} size={17} />}
       <span>{children}</span>
     </button>
@@ -390,16 +405,46 @@ function Logo({ dark = false }: { dark?: boolean }) {
 type Course = StaffCourse;
 type LessonSelection = { course: Course; lessonIndex: number };
 
+function memberName(user: User) {
+  return String(
+    user.user_metadata?.full_name || user.email?.split("@")[0] || "Member",
+  );
+}
+
+// Staff are marked in app_metadata, which members cannot change themselves.
+// The backend checks this again before accepting any course change.
+function isStaff(user?: User | null) {
+  return ["staff", "instructor"].includes(user?.app_metadata?.role);
+}
+
+const STAFF_PAGES: Page[] = ["admin", "builder", "instructor"];
+
+function memberInitials(user: User) {
+  return initialsOf(memberName(user));
+}
+
+function initialsOf(name: string) {
+  return name
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join("");
+}
+
 let courses: Course[] = initialCourses;
 
 function getFeaturedCourses() {
   const createdCourses = courses.filter(
-    (course) => !initialCourses.some((initial) => initial.title === course.title),
+    (course) =>
+      !initialCourses.some((initial) => initial.title === course.title),
   );
-  return [...createdCourses, ...courses].filter(
-    (course, index, list) =>
-      list.findIndex((item) => item.title === course.title) === index,
-  ).slice(0, 3);
+  return [...createdCourses, ...courses]
+    .filter(
+      (course, index, list) =>
+        list.findIndex((item) => item.title === course.title) === index,
+    )
+    .slice(0, 3);
 }
 
 function asResource(resource: CourseResource | string): CourseResource {
@@ -411,16 +456,42 @@ function asResource(resource: CourseResource | string): CourseResource {
 function normalizeLink(value: string) {
   const trimmed = value.trim();
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^https?\/\//i.test(trimmed)) return trimmed.replace(/^https?/i, "https:");
+  if (/^https?\/\//i.test(trimmed))
+    return trimmed.replace(/^https?/i, "https:");
   return `https://${trimmed}`;
 }
 
-let navigate: (page: Page, course?: Course, lessonIndex?: number) => void = () => {};
-function go(page: Page, course?: Course, lessonIndex?: number) {
-  navigate(page, course, lessonIndex);
+// Set by App: changes the address and shows that page.
+let navigateTo: (route: Route, options?: { replace?: boolean }) => void = () => {};
+
+function routeFor(page: Page, course?: Course, lessonIndex = 0): Route {
+  switch (page) {
+    case "course":
+      return course?.id ? { page, courseId: course.id } : { page: "explore" };
+    case "lesson":
+      return course?.id
+        ? { page, courseId: course.id, lessonIndex: Math.max(0, lessonIndex) }
+        : { page: "explore" };
+    case "builder":
+      return course?.id ? { page, courseId: course.id } : { page };
+    default:
+      return { page } as Route;
+  }
 }
 
-function PublicHeader({ active }: { active?: Page }) {
+function go(page: Page, course?: Course, lessonIndex?: number) {
+  navigateTo(routeFor(page, course, lessonIndex));
+}
+
+function PublicHeader({
+  active,
+  user,
+  onSignOut,
+}: {
+  active?: Page;
+  user?: User | null;
+  onSignOut?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <header className="public-header">
@@ -438,10 +509,27 @@ function PublicHeader({ active }: { active?: Page }) {
         >
           Explore Courses
         </button>
-        <button onClick={() => go("home")}>About Us</button>
-        <Button variant="outline" onClick={() => go("auth")}>
-          Sign In
-        </Button>
+        {user && (
+          <button onClick={() => go("dashboard")}>Student Space</button>
+        )}
+        {isStaff(user) && (
+          <button onClick={() => go("admin")}>Staff Workspace</button>
+        )}
+        <button
+          className={active === "about" ? "active" : ""}
+          onClick={() => go("about")}
+        >
+          About Us
+        </button>
+        {user && onSignOut ? (
+          <Button variant="outline" onClick={onSignOut}>
+            Sign Out
+          </Button>
+        ) : (
+          <Button variant="outline" onClick={() => go("auth")}>
+            Sign In
+          </Button>
+        )}
       </nav>
       <button className="menu-btn" onClick={() => setOpen(!open)}>
         <Icon name={open ? "close" : "menu"} />
@@ -454,7 +542,7 @@ function CourseCard({ course, index = 0 }: { course: Course; index?: number }) {
   return (
     <article className="course-card" onClick={() => go("course", course)}>
       <div className="course-image">
-        <img src={course.image} alt={`${course.title} course cover`} />
+        <img {...courseImageProps(course.image)} alt={`${course.title} course cover`} />
         <span className="badge">{course.level}</span>
       </div>
       <div className="course-body">
@@ -479,18 +567,20 @@ function CourseCard({ course, index = 0 }: { course: Course; index?: number }) {
   );
 }
 
-function Home() {
-  const cats: [IconName, string, string][] = [
-    ["plane", "RC Planes", "Aerodynamics & flight"],
-    ["car", "RC Cars", "Speed & control"],
-    ["boat", "RC Boats", "Marine engineering"],
-    ["chip", "Electronics", "Power & circuits"],
-    ["bot", "Robotics", "Build intelligent machines"],
-    ["wifi", "IoT", "Connected projects"],
-  ];
+function Home({
+  user,
+  onSignOut,
+}: {
+  user?: User | null;
+  onSignOut?: () => void;
+}) {
+  const coursesIn = (category: string) =>
+    courses.filter((course) => course.category === category).length;
+  const lessonTotal = courses.reduce((total, course) => total + lessonCount(course), 0);
+  const instructors = [...new Set(courses.map((course) => course.instructor))];
   return (
     <>
-      <PublicHeader active="home" />
+      <PublicHeader active="home" user={user} onSignOut={onSignOut} />
       <main className="public-main">
         <section className="hero">
           <div className="hero-copy">
@@ -506,26 +596,37 @@ function Home() {
               <Button onClick={() => go("explore")}>
                 Explore Courses <Icon name="arrow" />
               </Button>
-              <Button variant="outline" onClick={() => go("auth")}>
-                Join the Community
-              </Button>
+              {!user && (
+                <Button
+                  variant="outline"
+                  onClick={() => navigateTo({ page: "auth", register: true })}
+                >
+                  Join the Community
+                </Button>
+              )}
             </div>
             <div className="hero-proof">
               <span className="avatar-stack">
-                <i>DM</i>
-                <i>SO</i>
-                <i>KB</i>
+                {instructors.slice(0, 3).map((name) => (
+                  <i key={name} title={name}>
+                    {initialsOf(name)}
+                  </i>
+                ))}
               </span>
               <p>
-                <b>1,200+ builders</b>
+                <b>
+                  {courses.length} {courses.length === 1 ? "course" : "courses"} ·{" "}
+                  {lessonTotal} {lessonTotal === 1 ? "lesson" : "lessons"}
+                </b>
                 <br />
-                learning across Africa
+                taught by {instructors.length}{" "}
+                {instructors.length === 1 ? "instructor" : "instructors"}
               </p>
             </div>
           </div>
           <div className="hero-media">
             <img
-              src={hero}
+              {...courseImageProps(hero)}
               alt="A radio controlled aircraft flying in a clear sky"
             />
             <div className="flight-card">
@@ -563,18 +664,29 @@ function Home() {
             </div>
           </div>
           <div className="category-grid">
-            {cats.map(([icon, title, sub]) => (
-              <button key={title} onClick={() => go("explore")}>
-                <i>
-                  <Icon name={icon} />
-                </i>
-                <span>
-                  <b>{title}</b>
-                  <small>{sub}</small>
-                </span>
-                <Icon name="arrow" size={16} />
-              </button>
-            ))}
+            {CATEGORIES.map(({ icon, name, blurb }) => {
+              const count = coursesIn(name);
+              return (
+                <button
+                  key={name}
+                  disabled={count === 0}
+                  onClick={() => navigateTo({ page: "explore", category: name })}
+                >
+                  <i>
+                    <Icon name={icon} />
+                  </i>
+                  <span>
+                    <b>{name}</b>
+                    <small>
+                      {count === 0
+                        ? "Coming soon"
+                        : `${blurb} · ${count} ${count === 1 ? "course" : "courses"}`}
+                    </small>
+                  </span>
+                  {count > 0 && <Icon name="arrow" size={16} />}
+                </button>
+              );
+            })}
           </div>
         </section>
         <section className="why">
@@ -625,19 +737,35 @@ function Footer() {
       <p>Building Africa's next generation of practical engineers.</p>
       <div>
         <button onClick={() => go("explore")}>Courses</button>
-        <button>Community</button>
-        <button>About</button>
-        <button>Contact</button>
+        <button onClick={() => go("about")}>About</button>
       </div>
-      <small>© 2025 ELITE RC Community. Learn boldly.</small>
+      <small>© {new Date().getFullYear()} ELITE RC Community. Learn boldly.</small>
     </footer>
   );
 }
 
-function Explore() {
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("All");
-  const [difficulty, setDifficulty] = useState("All levels");
+function Explore({
+  filters,
+  user,
+  onSignOut,
+}: {
+  filters: Extract<Route, { page: "explore" }>;
+  user?: User | null;
+  onSignOut?: () => void;
+}) {
+  const [search, setSearch] = useState(filters.search ?? "");
+  const [filter, setFilter] = useState(filters.category ?? "All");
+  const [difficulty, setDifficulty] = useState(filters.level ?? "All levels");
+  // Keep the address in step with the filters so a filtered catalog can be shared.
+  useEffect(() => {
+    const path = routePath({
+      page: "explore",
+      category: filter === "All" ? undefined : filter,
+      level: difficulty === "All levels" ? undefined : difficulty,
+      search,
+    });
+    window.history.replaceState(null, "", path);
+  }, [search, filter, difficulty]);
   const filtered = useMemo(
     () =>
       courses.filter(
@@ -652,7 +780,7 @@ function Explore() {
   );
   return (
     <>
-      <PublicHeader active="explore" />
+      <PublicHeader active="explore" user={user} onSignOut={onSignOut} />
       <main className="catalog">
         <div className="catalog-head">
           <span className="eyebrow">COURSE LIBRARY</span>
@@ -672,7 +800,7 @@ function Explore() {
             />
           </label>
           <div className="filters" aria-label="Filter by category">
-            {["All", "RC Planes", "RC Cars", "RC Boats", "Electronics"].map(
+            {["All", ...catalogCategories(courses.map((c) => c.category))].map(
               (f) => (
                 <button
                   className={filter === f ? "active" : ""}
@@ -696,8 +824,12 @@ function Explore() {
           </select>
         </div>
         <div className="results-head">
-          <b>{filtered.length} courses</b>
-          <span>Showing practical learning paths</span>
+          <b>
+            {filtered.length} {filtered.length === 1 ? "course" : "courses"}
+          </b>
+          <span>
+            {filter === "All" ? "Showing practical learning paths" : `in ${filter}`}
+          </span>
         </div>
         {filtered.length ? (
           <div className="course-grid">
@@ -727,14 +859,95 @@ function Explore() {
   );
 }
 
-function CourseDetails({ course }: { course: Course }) {
+function About({ user, onSignOut }: { user?: User | null; onSignOut?: () => void }) {
+  return (
+    <>
+      <PublicHeader active="about" user={user} onSignOut={onSignOut} />
+      <main className="public-main">
+        <section className="hero about-hero">
+          <div className="hero-copy">
+            <span className="eyebrow">ABOUT ELITE RC</span>
+            <h1>Practical engineering, made accessible.</h1>
+            <p>
+              Elite RC helps curious builders learn by doing, with clear lessons
+              for aircraft, vehicles, electronics, and connected projects.
+            </p>
+          </div>
+          <div className="hero-media">
+            <img {...courseImageProps(hero)} alt="A radio controlled aircraft in flight" />
+          </div>
+        </section>
+        <section className="why">
+          <div>
+            <span className="eyebrow">HOW WE TEACH</span>
+            <h2>Build confidence through real projects.</h2>
+            <p>
+              Every learning path breaks complex systems into useful steps, so
+              members can understand the principles and apply them in the workshop.
+            </p>
+          </div>
+          <div className="why-grid">
+            <article>
+              <span>01</span>
+              <h3>Learn clearly</h3>
+              <p>Focused explanations and practical resources keep every lesson moving.</p>
+            </article>
+            <article>
+              <span>02</span>
+              <h3>Build bravely</h3>
+              <p>Hands-on projects turn theory into skills you can use and share.</p>
+            </article>
+            <article>
+              <span>03</span>
+              <h3>Grow together</h3>
+              <p>A shared course library gives builders a place to keep progressing.</p>
+            </article>
+          </div>
+        </section>
+      </main>
+      <Footer />
+    </>
+  );
+}
+
+function CourseDetails({
+  course,
+  user,
+  onSignOut,
+  tracking,
+}: {
+  course: Course;
+  user?: User | null;
+  onSignOut?: () => void;
+  tracking?: ProgressRow[];
+}) {
   const [open, setOpen] = useState(0);
+  const progress = tracking ? courseProgress(course, tracking) : undefined;
+  const doneKeys = new Set(
+    (tracking ?? []).filter((row) => row.course_id === course.id).map((row) => row.lesson_key),
+  );
+  const total = lessonCount(course);
+  const startButton = (
+    <Button
+      disabled={total === 0}
+      onClick={() => go("lesson", course, progress?.nextIndex ?? 0)}
+    >
+      {total === 0
+        ? "Lessons coming soon"
+        : progress?.finished
+          ? "Review course"
+          : progress?.done
+            ? "Continue learning"
+            : "Start Learning"}{" "}
+      {total > 0 && <Icon name="arrow" />}
+    </Button>
+  );
   const lessonContent = course.lessonContent ?? [];
   const lessonsForSection = (section: string) =>
     lessonContent.filter((lesson) => lesson.section === section);
   return (
     <>
-      <PublicHeader />
+      <PublicHeader user={user} onSignOut={onSignOut} />
       <main className="details">
         <button className="crumb" onClick={() => go("explore")}>
           Explore Courses / {course.category} / <b>{course.title}</b>
@@ -748,7 +961,7 @@ function CourseDetails({ course }: { course: Course }) {
             <p>{course.desc}</p>
             <div className="instructor">
               <img
-                src={course.instructorImage || "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80"}
+                {...personImageProps(course.instructorImage)}
                 alt={course.instructor}
                 className="instructor-avatar"
               />
@@ -757,11 +970,19 @@ function CourseDetails({ course }: { course: Course }) {
                 <b>{course.instructor}</b>
               </div>
             </div>
-            <Button onClick={() => go("lesson", course)}>
-              Start Learning <Icon name="arrow" />
-            </Button>
+            {progress && progress.done > 0 && (
+              <div className="course-progress">
+                <div className="progress-bar">
+                  <i style={{ width: `${progress.percent}%` }} />
+                </div>
+                <small>
+                  {progress.done} of {progress.total} lessons complete
+                </small>
+              </div>
+            )}
+            {startButton}
           </div>
-          <img src={course.image} alt={course.title} />
+          <img {...courseImageProps(course.image)} alt={course.title} />
         </section>
         <section className="details-grid">
           <div>
@@ -799,23 +1020,33 @@ function CourseDetails({ course }: { course: Course }) {
                   </button>
                   {open === index && (
                     <div className="lesson-list">
-                      {lessonsForSection(section).length === 0 && <p>Lessons coming soon.</p>}
+                      {lessonsForSection(section).length === 0 && (
+                        <p>Lessons coming soon.</p>
+                      )}
                       {lessonsForSection(section).map((lesson) => {
                         return (
-                        <button
-                          onClick={() => go("lesson", course, lessonContent.indexOf(lesson))}
-                          key={lesson.title}
-                        >
-                          <Icon
-                            name="play"
-                            size={17}
-                          />
-                          <span>
-                            {lesson.title}
-                            <small>OPEN LESSON</small>
-                          </span>
-                          <em>Open</em>
-                        </button>
+                          <button
+                            onClick={() =>
+                              go(
+                                "lesson",
+                                course,
+                                lessonContent.indexOf(lesson),
+                              )
+                            }
+                            key={lesson.title}
+                          >
+                            <Icon
+                              name={doneKeys.has(lessonKey(lesson)) ? "check" : "play"}
+                              size={17}
+                            />
+                            <span>
+                              {lesson.title}
+                              <small>
+                                {doneKeys.has(lessonKey(lesson)) ? "COMPLETED" : "OPEN LESSON"}
+                              </small>
+                            </span>
+                            <em>Open</em>
+                          </button>
                         );
                       })}
                     </div>
@@ -848,11 +1079,7 @@ function CourseDetails({ course }: { course: Course }) {
               </span>
             </p>
             <hr />
-            <Button onClick={() => go("lesson", course)}>Start Learning</Button>
-            <button className="download">
-              <Icon name="download" />
-              Download course overview
-            </button>
+            {startButton}
           </aside>
         </section>
       </main>
@@ -863,25 +1090,26 @@ function CourseDetails({ course }: { course: Course }) {
 const studentNav: [Page, IconName, string][] = [
   ["dashboard", "grid", "Dashboard"],
   ["explore", "search", "Explore Courses"],
-  ["course", "book", "My Learning"],
-  ["progress", "chart", "Progress"],
+  ["progress", "book", "My Learning"],
   ["profile", "user", "Profile"],
 ];
 function AppShell({
   children,
   active,
+  user,
+  onSignOut,
 }: {
   children: ReactNode;
   active: Page;
+  user: User;
+  onSignOut: () => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="app-shell">
       <aside className={`side ${open ? "open" : ""}`}>
         <Logo />
-        <div className="side-label">
-          STUDENT SPACE
-        </div>
+        <div className="side-label">STUDENT SPACE</div>
         <nav>
           {studentNav.map(([page, icon, label]) => (
             <button
@@ -896,12 +1124,18 @@ function AppShell({
               {label}
             </button>
           ))}
+          {isStaff(user) && (
+            <button onClick={() => go("admin")}>
+              <Icon name="grid" />
+              Staff Workspace
+            </button>
+          )}
         </nav>
         <div className="side-user">
-          <span>AK</span>
+          <span>{memberInitials(user)}</span>
           <div>
-            <b>Alex Kofi</b>
-            <small>Student · Level 2</small>
+            <b>{memberName(user)}</b>
+            <small>{isStaff(user) ? "Staff" : "Member"}</small>
           </div>
         </div>
       </aside>
@@ -912,10 +1146,10 @@ function AppShell({
           </button>
           <div>
             <span className="status-dot" />
-            All systems operational
+            Signed in as {user.email}
           </div>
           <button className="top-profile" onClick={() => go("profile")}>
-            <span>AK</span>
+            <span>{memberInitials(user)}</span>
             <Icon name="chevron" size={16} />
           </button>
         </header>
@@ -925,145 +1159,316 @@ function AppShell({
   );
 }
 
-function Dashboard() {
+function Dashboard({
+  user,
+  onSignOut,
+  progress,
+}: {
+  user: User;
+  onSignOut: () => void;
+  progress: ProgressState;
+}) {
+  const tracking = progress.status === "ready" ? progress.rows : undefined;
+  const started = tracking ? coursesInProgress(courses, tracking) : [];
+  const current = started.find((entry) => !entry.progress.finished) ?? started[0];
+  const lessonsDone = started.reduce((total, entry) => total + entry.progress.done, 0);
+  const finishedCount = started.filter((entry) => entry.progress.finished).length;
+  const featured = courses[0];
+  const nextTitle =
+    current && current.progress.nextIndex !== undefined
+      ? current.course.lessonContent?.[current.progress.nextIndex]?.title
+      : undefined;
+
   return (
-    <AppShell active="dashboard">
+    <AppShell active="dashboard" user={user} onSignOut={onSignOut}>
       <div className="page-title">
         <div>
           <span className="eyebrow">YOUR LEARNING</span>
-          <h1>Welcome back, Alex.</h1>
-          <p>You're building real engineering skills—one lesson at a time.</p>
-        </div>
-        <Button variant="outline" onClick={() => go("explore")}>
-          Explore courses
-        </Button>
-      </div>
-      <section className="continue-card">
-        <img src={courses[0].image} alt="RC plane course" />
-        <div>
-          <span className="badge">IN PROGRESS</span>
-          <h2>{courses[0].title}</h2>
+          <h1>Welcome back, {memberName(user)}.</h1>
           <p>
-            Next up: <b>{courses[0].sampleLessons[1]}</b>
+            {current
+              ? "Pick up where you left off."
+              : "You're building real engineering skills, one lesson at a time."}
           </p>
-          <div className="progress-bar">
-            <i style={{ width: "38%" }} />
+        </div>
+      </div>
+      {current ? (
+        <section className="continue-card">
+          <img {...courseImageProps(current.course.image)} alt="" />
+          <div>
+            <span className="badge">
+              {current.progress.finished ? "COMPLETED" : "IN PROGRESS"}
+            </span>
+            <h2>{current.course.title}</h2>
+            <p>
+              {nextTitle ? (
+                <>
+                  Next up: <b>{nextTitle}</b>
+                </>
+              ) : (
+                "You have completed every lesson in this course."
+              )}
+            </p>
+            <div className="progress-bar">
+              <i style={{ width: `${current.progress.percent}%` }} />
+            </div>
+            <small>
+              <span>
+                {current.progress.done} of {current.progress.total} lessons complete
+              </span>
+              <span>{current.progress.percent}%</span>
+            </small>
+            <Button
+              onClick={() =>
+                go("lesson", current.course, current.progress.nextIndex ?? 0)
+              }
+            >
+              {current.progress.finished ? "Review course" : "Continue learning"}{" "}
+              <Icon name="arrow" />
+            </Button>
           </div>
-          <small>5 of {courses[0].lessons} lessons complete</small>
-          <Button onClick={() => go("lesson", courses[0])}>
-            Continue learning <Icon name="arrow" />
-          </Button>
-        </div>
-        <div className="ring">
-          <b>38%</b>
-          <small>complete</small>
-        </div>
-      </section>
+        </section>
+      ) : progress.status === "loading" ? (
+        <section className="continue-card loading" aria-busy="true">
+          <div>
+            <span className="badge">YOUR LEARNING</span>
+            <h2>Loading your progress...</h2>
+          </div>
+        </section>
+      ) : featured ? (
+        <section className="continue-card">
+          <img {...courseImageProps(featured.image)} alt="" />
+          <div>
+            <span className="badge">START HERE</span>
+            <h2>{featured.title}</h2>
+            <p>{featured.desc}</p>
+            <small>
+              {lessonCount(featured)} lessons · {featured.duration}
+            </small>
+            <Button onClick={() => go("course", featured)}>
+              View course <Icon name="arrow" />
+            </Button>
+          </div>
+        </section>
+      ) : null}
       <section className="panel">
         <div className="panel-head">
-          <h2>Explore more courses</h2>
+          <div>
+            <h2>{tracking ? "Your progress" : "Learning rhythm"}</h2>
+            <p>
+              {tracking
+                ? "Lessons count once you mark them complete."
+                : "A simple way to keep your workshop practice moving."}
+            </p>
+          </div>
+          {tracking && (
+            <Button variant="outline" onClick={() => go("progress")}>
+              My learning
+            </Button>
+          )}
         </div>
-        <div className="course-grid">
-          {courses.slice(1, 4).map((course, i) => (
-            <CourseCard key={course.title} course={course} index={i} />
-          ))}
+        <div className="dashboard-overview">
+          {tracking ? (
+            <>
+              <article>
+                <span className="eyebrow">LESSONS COMPLETED</span>
+                <h3>{lessonsDone}</h3>
+                <p>
+                  Across {started.length} {started.length === 1 ? "course" : "courses"}.
+                </p>
+              </article>
+              <article>
+                <span className="eyebrow">COURSES FINISHED</span>
+                <h3>{finishedCount}</h3>
+                <p>Complete every lesson in a course to finish it.</p>
+              </article>
+            </>
+          ) : (
+            <>
+              <article>
+                <span className="eyebrow">EXPLORE</span>
+                <h3>
+                  {courses.length} {courses.length === 1 ? "course" : "courses"} to choose from
+                </h3>
+                <p>Browse the catalog and pick the next idea you want to turn into something you can build.</p>
+              </article>
+              <article>
+                <span className="eyebrow">WORKSHOP NOTE</span>
+                <h3>Small sessions add up.</h3>
+                <p>Set aside a little time to review, practice, and return to your project with a clearer eye.</p>
+              </article>
+            </>
+          )}
         </div>
       </section>
     </AppShell>
   );
 }
 
-function Lesson({ course, lessonIndex }: LessonSelection) {
+type LessonTracking = {
+  done: boolean;
+  onComplete: () => Promise<void>;
+  onUndo: () => Promise<void>;
+};
+
+function Lesson({
+  course,
+  lessonIndex,
+  tracking,
+  signedIn,
+}: LessonSelection & { tracking?: LessonTracking; signedIn: boolean }) {
   const [started, setStarted] = useState(false);
-  const lessonTitle =
-    course.lessonContent?.[lessonIndex]?.title || course.sampleLessons[lessonIndex] || course.sampleLessons[0];
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const lesson = course.lessonContent?.[lessonIndex];
+  const total = lessonCount(course);
+  const title = lesson?.title || course.sampleLessons[lessonIndex] || "Lesson";
+  const previousIndex = lessonIndex > 0 ? lessonIndex - 1 : undefined;
+  const nextIndex = lessonIndex + 1 < total ? lessonIndex + 1 : undefined;
+  const nextTitle =
+    nextIndex === undefined ? undefined : course.lessonContent?.[nextIndex]?.title;
+  const slideCount = lesson?.slides.length ?? 0;
+  const included: [IconName, string][] = [];
+  if (slideCount) {
+    included.push(["file", `${slideCount} slide ${slideCount === 1 ? "file" : "files"} to open or download`]);
+  }
+  if (lesson?.video) included.push(["video", "A short video preview"]);
+  if (lesson?.youtubeUrl) included.push(["play", "The full lesson video on YouTube"]);
+
+  const completesLesson = Boolean(tracking && !tracking.done);
+  // Saves the lesson as complete (when tracking) before moving on.
+  const moveOn = async () => {
+    if (completesLesson && tracking) {
+      setSaving(true);
+      setSaveError("");
+      try {
+        await tracking.onComplete();
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : "Your progress could not be saved.");
+        setSaving(false);
+        return;
+      }
+      setSaving(false);
+    }
+    if (nextIndex === undefined) go("course", course);
+    else go("lesson", course, nextIndex);
+  };
+  const undo = async () => {
+    if (!tracking) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      await tracking.onUndo();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Your progress could not be saved.");
+    }
+    setSaving(false);
+  };
+
   return (
     <div className="lesson-shell">
       <header className="lesson-top">
         <Logo dark />
-            <button className="crumb" onClick={() => go("course", course)}>
-              {course.title}
-            </button>
-            <span>Lesson {lessonIndex + 1} of {course.lessons}</span>
+        <button className="crumb" onClick={() => go("course", course)}>
+          ← {course.title}
+        </button>
+        <span>
+          Lesson {lessonIndex + 1} of {total}
+        </span>
       </header>
       <main className="lesson-content">
-            <span className="eyebrow">
-              {course.category.toUpperCase()} · {started ? `LESSON ${lessonIndex + 1}` : "OVERVIEW"}
-            </span>
-            <h1>{started ? lessonTitle : `Welcome to ${course.title}`}</h1>
-            <p className="lead">
-              {started
-                ? `Work through this lesson in ${course.title.toLowerCase()} and use the attached resources as you build.`
-                : `Start building your foundation with this practical introduction to ${course.title.toLowerCase()}.`}
-            </p>
-            <article className="content-card">
-              {started ? (
-                <>
-                  <h2>{lesson?.title || lessonTitle}</h2>
-                  <p>
-                    This lesson is part of the {lesson?.section || "course curriculum"} section.
-                  </p>
-                  {lesson?.slides.length ? (
-                    <div className="lesson-resource">
-                      <b>Slides</b>
-                      {lesson.slides.map((slide) => {
-                        const resource = asResource(slide);
-                        return (
-                        <a href={resource.url} download={resource.name} target="_blank" rel="noreferrer" key={resource.name}>
-                          {resource.name} · Open slides
-                        </a>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                  {lesson?.video ? (
-                    <div className="lesson-resource">
-                      <b>Short video preview</b>
-                      {typeof lesson.video === "string" ? (
-                        <a href={lesson.video} target="_blank" rel="noreferrer">
-                          Open preview clip
-                        </a>
-                      ) : (
-                        <video controls preload="metadata" src={lesson.video.url}>
-                          Your browser does not support video playback.
-                        </video>
-                      )}
-                      {lesson.youtubeUrl && (
-                        <a
-                          className="full-video-link"
-                          href={normalizeLink(lesson.youtubeUrl)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Watch the full video on YouTube
-                        </a>
-                      )}
-                    </div>
-                  ) : null}
-                  {!lesson?.video && lesson?.youtubeUrl ? (
-                    <div className="lesson-resource">
-                      <b>Full lesson video</b>
+        <span className="eyebrow">
+          {(lesson?.section || course.category).toUpperCase()} · LESSON{" "}
+          {lessonIndex + 1}
+        </span>
+        <h1>{title}</h1>
+        <p className="lead">
+          {started
+            ? "Work through the resources below at your own pace."
+            : `Part of ${course.title}${lesson?.section ? `, in the ${lesson.section} section` : ""}.`}
+        </p>
+        {tracking?.done && (
+          <p className="lesson-done" role="status">
+            <Icon name="check" size={16} /> You completed this lesson.
+            <button type="button" onClick={() => void undo()} disabled={saving}>
+              Mark as not done
+            </button>
+          </p>
+        )}
+        <article className="content-card">
+          {started ? (
+            <>
+              <h2>Lesson resources</h2>
+              {slideCount ? (
+                <div className="lesson-resource">
+                  <b>Slides</b>
+                  {lesson?.slides.map((slide) => {
+                    const resource = asResource(slide);
+                    return (
                       <a
-                        className="full-video-link"
-                        href={normalizeLink(lesson.youtubeUrl)}
+                        href={resource.url}
+                        download={resource.name}
                         target="_blank"
                         rel="noreferrer"
+                        key={resource.url}
                       >
-                        Watch the full video on YouTube
+                        {resource.name} · Open slides
                       </a>
-                    </div>
-                  ) : null}
-                  {!lesson && <p>Lesson resources will be added by the instructor.</p>}
-                </>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {lesson?.video ? (
+                <div className="lesson-resource">
+                  <b>Short video preview</b>
+                  {typeof lesson.video === "string" ? (
+                    <a href={lesson.video} target="_blank" rel="noreferrer">
+                      Open preview clip
+                    </a>
+                  ) : (
+                    <video controls preload="metadata" src={lesson.video.url}>
+                      Your browser does not support video playback.
+                    </video>
+                  )}
+                </div>
+              ) : null}
+              {lesson?.youtubeUrl ? (
+                <div className="lesson-resource">
+                  <b>Full lesson video</b>
+                  <a
+                    className="full-video-link"
+                    href={normalizeLink(lesson.youtubeUrl)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Watch the full video on YouTube
+                  </a>
+                </div>
+              ) : null}
+              {included.length === 0 && (
+                <p>The instructor has not added files or videos to this lesson yet.</p>
+              )}
+            </>
+          ) : (
+            <>
+              <h2>In this lesson</h2>
+              {included.length ? (
+                <div className="objectives">
+                  {included.map(([icon, text]) => (
+                    <p key={text}>
+                      <i>
+                        <Icon name={icon} size={15} />
+                      </i>
+                      {text}
+                    </p>
+                  ))}
+                </div>
               ) : (
+                <p>The instructor has not added files or videos to this lesson yet.</p>
+              )}
+              {course.objectives.length > 0 && (
                 <>
-                  <h2>Lesson overview</h2>
-                  <p>
-                    In this lesson, you will learn the essential ideas, equipment,
-                    and safety practices needed to continue confidently through
-                    the course.
-                  </p>
+                  <h3 className="lesson-subhead">This course helps you</h3>
                   <div className="objectives">
                     {course.objectives.slice(0, 3).map((objective) => (
                       <p key={objective}>
@@ -1076,56 +1481,244 @@ function Lesson({ course, lessonIndex }: LessonSelection) {
                   </div>
                 </>
               )}
-            </article>
-            <div className="lesson-nav">
-              <Button variant="outline" onClick={() => go("course", course)}>
-                Back to course
-              </Button>
-              {!started && (
-                <Button onClick={() => setStarted(true)}>
-                  Start lesson <Icon name="arrow" />
-                </Button>
-              )}
-            </div>
+            </>
+          )}
+        </article>
+        <nav className="lesson-nav" aria-label="Lessons">
+          {previousIndex === undefined ? (
+            <Button variant="outline" onClick={() => go("course", course)}>
+              Back to course
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={() => go("lesson", course, previousIndex)}
+            >
+              ← Previous lesson
+            </Button>
+          )}
+          {!started ? (
+            <Button onClick={() => setStarted(true)}>
+              Start lesson <Icon name="arrow" />
+            </Button>
+          ) : (
+            <Button onClick={() => void moveOn()} disabled={saving}>
+              {saving
+                ? "Saving..."
+                : nextIndex === undefined
+                  ? completesLesson
+                    ? "Complete course"
+                    : "Finish course"
+                  : completesLesson
+                    ? "Complete & continue"
+                    : "Next lesson"}{" "}
+              <Icon name={nextIndex === undefined ? "check" : "arrow"} />
+            </Button>
+          )}
+        </nav>
+        {saveError && (
+          <p role="alert" className="form-error lesson-next">
+            {saveError}
+          </p>
+        )}
+        {started && nextTitle && <p className="lesson-next">Up next: {nextTitle}</p>}
+        {started && !signedIn && (
+          <p className="lesson-next">
+            <button
+              type="button"
+              className="text-link"
+              onClick={() =>
+                navigateTo({
+                  page: "auth",
+                  next: routePath({ page: "lesson", courseId: course.id ?? "", lessonIndex }),
+                })
+              }
+            >
+              Sign in to keep track of the lessons you complete
+            </button>
+          </p>
+        )}
       </main>
     </div>
   );
 }
 
-function ProgressPage() {
+function ProgressPage({
+  user,
+  onSignOut,
+  progress,
+}: {
+  user: User;
+  onSignOut: () => void;
+  progress: ProgressState;
+}) {
+  const tracking = progress.status === "ready" ? progress.rows : undefined;
+  const started = tracking ? coursesInProgress(courses, tracking) : [];
+  const notStarted = courses.filter(
+    (course) => !started.some((entry) => entry.course.id === course.id),
+  );
+
   return (
-    <AppShell active="progress">
+    <AppShell active="progress" user={user} onSignOut={onSignOut}>
       <div className="page-title">
         <div>
           <span className="eyebrow">YOUR LEARNING</span>
-          <h1>Progress & achievements</h1>
-          <p>Track the practical skills you're building.</p>
+          <h1>My learning</h1>
+          <p>Every course you have started, and how far you are.</p>
         </div>
       </div>
-      <section className="panel">
-        <h2>Course progress</h2>
-        {courses.slice(0, 3).map((course, index) => (
-          <div className="skill-row" key={course.title}>
-            <img src={course.image} alt="" />
+      {progress.status === "loading" && (
+        <section className="panel">
+          <p className="panel-note">Loading your progress...</p>
+        </section>
+      )}
+      {progress.status === "unavailable" && (
+        <section className="panel">
+          <p className="panel-note">
+            Progress tracking is not switched on yet, so completed lessons are
+            not saved. You can still open every course and lesson.
+          </p>
+        </section>
+      )}
+      {tracking && (
+        <section className="panel">
+          <div className="panel-head">
             <div>
-              <b>{course.title}</b>
-              <span>{[46, 28, 12][index]}% complete</span>
-              <div className="progress-bar">
-                <i style={{ width: `${[46, 28, 12][index]}%` }} />
-              </div>
+              <h2>In progress</h2>
+              <p>
+                {started.length
+                  ? "Pick up where you left off."
+                  : "You have not completed any lessons yet. Mark lessons complete as you go."}
+              </p>
             </div>
-            <Button variant="outline" onClick={() => go("course", course)}>
-              View course
-            </Button>
           </div>
-        ))}
-      </section>
+          {started.map(({ course, progress: courseState }) => (
+            <div className="skill-row" key={course.id}>
+              <img {...courseImageProps(course.image)} alt="" />
+              <div>
+                <b>{course.title}</b>
+                <span>
+                  {courseState.done} of {courseState.total} lessons ·{" "}
+                  {courseState.percent}%
+                </span>
+                <div className="progress-bar">
+                  <i style={{ width: `${courseState.percent}%` }} />
+                </div>
+              </div>
+              <Button
+                variant={courseState.finished ? "outline" : "primary"}
+                onClick={() => go("lesson", course, courseState.nextIndex ?? 0)}
+              >
+                {courseState.finished ? "Review" : "Continue"}
+              </Button>
+            </div>
+          ))}
+        </section>
+      )}
+      {notStarted.length > 0 && (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <h2>{tracking ? "Not started yet" : "Courses"}</h2>
+              <p>Open a course to start learning.</p>
+            </div>
+          </div>
+          {notStarted.map((course) => (
+            <div className="skill-row" key={course.id ?? course.title}>
+              <img {...courseImageProps(course.image)} alt="" />
+              <div>
+                <b>{course.title}</b>
+                <span>
+                  {lessonCount(course)} {lessonCount(course) === 1 ? "lesson" : "lessons"} ·{" "}
+                  {course.level}
+                </span>
+              </div>
+              <Button variant="outline" onClick={() => go("course", course)}>
+                View course
+              </Button>
+            </div>
+          ))}
+        </section>
+      )}
     </AppShell>
   );
 }
 
-function Auth() {
-  const [register, setRegister] = useState(false);
+// returnTo is the page that needed a sign-in; it opens again afterwards.
+function Auth({ returnTo, startRegistering = false }: { returnTo?: Route; startRegistering?: boolean }) {
+  const [register, setRegister] = useState(startRegistering);
+  const [forgotPassword, setForgotPassword] = useState(false);
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [resetCooldown, setResetCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resetCooldown === 0) return;
+    const timer = window.setInterval(() => {
+      setResetCooldown((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [resetCooldown]);
+
+  const submit = async () => {
+    setError("");
+    setMessage("");
+    setSubmitting(true);
+    try {
+      if (forgotPassword) {
+        if (resetCooldown > 0) return;
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+          email.trim(),
+          { redirectTo: window.location.origin },
+        );
+        if (resetError) throw resetError;
+        setMessage("Check your email for a password reset link. If you don't see it, check your spam folder.");
+        setResetCooldown(30);
+        return;
+      }
+      const result = register
+        ? await supabase.auth.signUp({
+            email: email.trim(),
+            password,
+            options: { data: { full_name: fullName.trim() } },
+          })
+        : await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password,
+          });
+      if (result.error) throw result.error;
+      if (result.data.session) {
+        // Replace the sign-in page so Back does not return to it.
+        navigateTo(
+          returnTo ?? { page: isStaff(result.data.session.user) ? "admin" : "dashboard" },
+          { replace: true },
+        );
+      } else {
+        setMessage(
+          "Account created. Check your email to confirm your account, then sign in.",
+        );
+        setRegister(false);
+      }
+    } catch (authError) {
+      const errorMessage =
+        authError instanceof Error
+          ? authError.message
+          : "Authentication failed. Please try again.";
+      if (forgotPassword && /rate limit|too many requests/i.test(errorMessage)) {
+        setResetCooldown(60);
+        setError("Supabase has temporarily limited reset emails. Wait a few minutes before trying again.");
+      } else {
+        setError(errorMessage);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="auth">
       <section>
@@ -1146,37 +1739,100 @@ function Auth() {
         </button>
         <div className="auth-card">
           <span className="eyebrow">
-            {register ? "JOIN THE COMMUNITY" : "WELCOME BACK"}
+            {forgotPassword
+              ? "RESET YOUR PASSWORD"
+              : register
+                ? "JOIN THE COMMUNITY"
+                : "WELCOME BACK"}
           </span>
-          <h2>{register ? "Create your account" : "Sign in to continue"}</h2>
-          <p>Authentication will be connected in the backend phase.</p>
-          {register && (
+          <h2>
+            {forgotPassword
+              ? "Forgot your password?"
+              : register
+                ? "Create your account"
+                : "Sign in to continue"}
+          </h2>
+          <p>
+            {forgotPassword
+              ? "Enter your email and we will send you a secure reset link."
+              : "Use your member account to continue learning."}
+          </p>
+          {register && !forgotPassword && (
             <label>
               Full name
-              <input placeholder="Your name" />
+              <input
+                value={fullName}
+                onChange={(event) => setFullName(event.target.value)}
+                placeholder="Your name"
+              />
             </label>
           )}
           <label>
             Email address
-            <input type="email" placeholder="you@example.com" />
+            <input
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              type="email"
+              placeholder="you@example.com"
+              required
+            />
           </label>
-          <label>
+          {!forgotPassword && <label>
             Password
-            <input type="password" placeholder="At least 8 characters" />
-          </label>
-          <Button className="wide" onClick={() => go("dashboard")}>
-            {register ? "Create account" : "Sign in"}
-          </Button>
+            <input
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              type="password"
+              placeholder="At least 8 characters"
+              minLength={6}
+              required
+            />
+          </label>}
+          {error && (
+            <p role="alert" className="form-error">
+              {error}
+            </p>
+          )}
+          {message && <p role="status">{message}</p>}
           <Button
-            variant="outline"
             className="wide"
-            onClick={() => go("instructor")}
+            onClick={() => void submit()}
+            disabled={forgotPassword && resetCooldown > 0}
           >
-            Enter Instructor Workspace
+            {forgotPassword
+              ? resetCooldown > 0
+                ? `Send again in ${resetCooldown}s`
+                : "Send reset link"
+              : register
+                ? "Create account"
+                : "Sign in"}
           </Button>
+          {!register && !forgotPassword && (
+            <button
+              className="forgot"
+              onClick={() => {
+                setError("");
+                setMessage("");
+                setForgotPassword(true);
+              }}
+            >
+              Forgot password?
+            </button>
+          )}
           <p className="switch">
-            <button onClick={() => setRegister(!register)}>
-              {register ? "Sign in" : "Create an account"}
+            <button
+              onClick={() => {
+                setError("");
+                setMessage("");
+                setForgotPassword(false);
+                setRegister(!register);
+              }}
+            >
+              {forgotPassword
+                ? "Back to sign in"
+                : register
+                  ? "Sign in"
+                  : "Create an account"}
             </button>
           </p>
         </div>
@@ -1185,49 +1841,412 @@ function Auth() {
   );
 }
 
-function ProfilePage() {
+function ResetPassword() {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const updatePassword = async () => {
+    setError("");
+    setMessage("");
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+    if (password !== confirmation) {
+      setError("Passwords do not match.");
+      return;
+    }
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+    setMessage("Your password has been updated successfully. You can now log in with your new password.");
+  };
+
   return (
-    <AppShell active="profile">
+    <div className="auth">
+      <section>
+        <Logo />
+        <div>
+          <span className="eyebrow light">WELCOME BACK</span>
+          <h1>Keep building.</h1>
+          <p>Set a new password and return to your learning space.</p>
+        </div>
+        <small>ELITE RC COMMUNITY</small>
+      </section>
+      <main>
+        <div className="auth-card">
+          <span className="eyebrow">NEW PASSWORD</span>
+          <h2>Choose a new password</h2>
+          <p>Use at least 6 characters for your new password.</p>
+          <label>
+            New password
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              minLength={6}
+            />
+          </label>
+          <label>
+            Confirm password
+            <input
+              type="password"
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+              minLength={6}
+            />
+          </label>
+          {error && <p role="alert" className="form-error">{error}</p>}
+          {message && <p role="status">{message}</p>}
+          {!message ? (
+            <Button className="wide" onClick={() => void updatePassword()}>
+              Update password
+            </Button>
+          ) : (
+            <Button className="wide" onClick={() => go("dashboard")}>
+              Continue learning
+            </Button>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function ProfilePage({
+  user,
+  onSignOut,
+}: {
+  user: User;
+  onSignOut: () => void;
+}) {
+  const [fullName, setFullName] = useState(memberName(user));
+  const [nameState, setNameState] = useState({ busy: false, error: "", done: "" });
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [passwordState, setPasswordState] = useState({ busy: false, error: "", done: "" });
+
+  const saveName = async () => {
+    const name = fullName.trim();
+    if (!name) {
+      setNameState({ busy: false, error: "Enter your name.", done: "" });
+      return;
+    }
+    setNameState({ busy: true, error: "", done: "" });
+    // The new name reaches the rest of the app through Supabase's USER_UPDATED event.
+    const { error } = await supabase.auth.updateUser({ data: { full_name: name } });
+    setNameState(
+      error
+        ? { busy: false, error: error.message, done: "" }
+        : { busy: false, error: "", done: "Your name has been saved." },
+    );
+  };
+
+  const savePassword = async () => {
+    if (password.length < 6) {
+      setPasswordState({ busy: false, error: "Use at least 6 characters.", done: "" });
+      return;
+    }
+    if (password !== confirmation) {
+      setPasswordState({ busy: false, error: "The passwords do not match.", done: "" });
+      return;
+    }
+    setPasswordState({ busy: true, error: "", done: "" });
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) {
+      setPasswordState({ busy: false, error: error.message, done: "" });
+      return;
+    }
+    setPassword("");
+    setConfirmation("");
+    setPasswordState({ busy: false, error: "", done: "Your password has been changed." });
+  };
+
+  return (
+    <AppShell active="profile" user={user} onSignOut={onSignOut}>
       <div className="page-title">
         <div>
           <span className="eyebrow">ACCOUNT</span>
           <h1>Your profile</h1>
-          <p>Manage your learning profile.</p>
+          <p>Update your name and password.</p>
         </div>
       </div>
       <section className="panel profile-panel">
         <div className="profile-cover" />
         <div className="profile-main">
-          <span className="profile-avatar">AK</span>
+          <span className="profile-avatar">{memberInitials(user)}</span>
           <div>
-            <h2>Alex Kofi</h2>
-            <p>Student builder</p>
+            <h2>{memberName(user)}</h2>
+            <p>
+              {isStaff(user) ? "Staff" : "Member"} · {user.email}
+            </p>
           </div>
+          <Button variant="outline" onClick={onSignOut}>
+            Sign out
+          </Button>
         </div>
-        <div className="profile-form">
+        <form
+          className="profile-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveName();
+          }}
+        >
+          <h3>Your name</h3>
           <label>
             Full name
-            <input defaultValue="Alex Kofi" />
+            <input
+              value={fullName}
+              autoComplete="name"
+              onChange={(event) => setFullName(event.target.value)}
+            />
           </label>
           <label>
             Email address
-            <input defaultValue="alex.kofi@example.com" />
+            <input value={user.email || ""} readOnly aria-describedby="email-note" />
+            <small id="email-note">Your email address is your sign-in and cannot be changed here.</small>
           </label>
-          <Button>Save changes</Button>
-        </div>
+          <div className="profile-actions">
+            <Button disabled={nameState.busy || fullName.trim() === memberName(user)}>
+              {nameState.busy ? "Saving..." : "Save name"}
+            </Button>
+            {nameState.error && <p role="alert" className="form-error">{nameState.error}</p>}
+            {nameState.done && <p role="status">{nameState.done}</p>}
+          </div>
+        </form>
+        <form
+          className="profile-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void savePassword();
+          }}
+        >
+          <h3>Change password</h3>
+          <label>
+            New password
+            <input
+              type="password"
+              value={password}
+              autoComplete="new-password"
+              minLength={6}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
+          <label>
+            Confirm new password
+            <input
+              type="password"
+              value={confirmation}
+              autoComplete="new-password"
+              minLength={6}
+              onChange={(event) => setConfirmation(event.target.value)}
+            />
+          </label>
+          <div className="profile-actions">
+            <Button disabled={passwordState.busy || !password}>
+              {passwordState.busy ? "Saving..." : "Change password"}
+            </Button>
+            {passwordState.error && <p role="alert" className="form-error">{passwordState.error}</p>}
+            {passwordState.done && <p role="status">{passwordState.done}</p>}
+          </div>
+        </form>
       </section>
     </AppShell>
   );
 }
 
+function NotFound({
+  user,
+  onSignOut,
+  title = "Page not found",
+  message = "The link may be incomplete, or the page has moved.",
+}: {
+  user?: User | null;
+  onSignOut?: () => void;
+  title?: string;
+  message?: string;
+}) {
+  return (
+    <>
+      <PublicHeader user={user} onSignOut={onSignOut} />
+      <main className="catalog">
+        <div className="empty">
+          <Icon name="search" size={32} />
+          <h2>{title}</h2>
+          <p>{message}</p>
+          <Button onClick={() => go("explore")}>Browse courses</Button>
+        </div>
+      </main>
+      <Footer />
+    </>
+  );
+}
+
+function StatusScreen({
+  eyebrow,
+  title,
+  message,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  message: string;
+  children?: ReactNode;
+}) {
+  return (
+    <main className="auth">
+      <section>
+        <Logo />
+        <div>
+          <span className="eyebrow light">{eyebrow}</span>
+          <h1>{title}</h1>
+          <p>{message}</p>
+          {children}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+const SIGNED_IN_PAGES: Page[] = ["dashboard", "progress", "profile", ...STAFF_PAGES];
+
+function lessonCount(course: Course) {
+  return course.lessonContent?.length ?? course.lessons;
+}
+
+function pageTitle(route: Route, course?: Course) {
+  const titles: Partial<Record<Page, string>> = {
+    explore: "Courses",
+    about: "About",
+    auth: "Sign in",
+    "reset-password": "Reset password",
+    dashboard: "Dashboard",
+    progress: "My learning",
+    profile: "Profile",
+    admin: "Staff workspace",
+    instructor: "Instructor workspace",
+    builder: course ? `Edit ${course.title}` : "New course",
+    "not-found": "Page not found",
+  };
+  if (route.page === "lesson" && course) {
+    const lesson = course.lessonContent?.[route.lessonIndex];
+    return `${lesson?.title ?? "Lesson"} · ${course.title}`;
+  }
+  const title = route.page === "course" ? course?.title : titles[route.page];
+  return title ? `${title} · Elite RC` : "Elite RC Learning Hub";
+}
+
 export default function App() {
-  const [page, setPage] = useState<Page>("home");
-  const [selectedCourse, setSelectedCourse] = useState<Course>(courses[0]);
-  const [selectedLessonIndex, setSelectedLessonIndex] = useState(0);
-  const [editingCourse, setEditingCourse] = useState<Course>();
+  const [route, setRoute] = useState<Route>(() =>
+    parseRoute(window.location.pathname, window.location.search),
+  );
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [courseVersion, refreshCourses] = useState(0);
-  const [courseLoadState, setCourseLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [courseLoadState, setCourseLoadState] = useState<
+    "loading" | "ready" | "error"
+  >("loading");
   const [courseLoadError, setCourseLoadError] = useState("");
+  const [progress, setProgress] = useState<ProgressState>({ status: "off", rows: [] });
+  const page = route.page;
+
+  navigateTo = (next, { replace = false } = {}) => {
+    const path = routePath(next);
+    if (replace) window.history.replaceState(null, "", path);
+    else if (path !== window.location.pathname + window.location.search) {
+      window.history.pushState(null, "", path);
+    }
+    setRoute(next);
+    window.scrollTo({ top: 0 });
+  };
+
+  useEffect(() => {
+    const showAddress = () =>
+      setRoute(parseRoute(window.location.pathname, window.location.search));
+    window.addEventListener("popstate", showAddress);
+    return () => window.removeEventListener("popstate", showAddress);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setUser(data.session?.user ?? null);
+      setAuthReady(true);
+    });
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+      setUser(session?.user ?? null);
+      if (event === "PASSWORD_RECOVERY") {
+        navigateTo({ page: "reset-password" }, { replace: true });
+      }
+    });
+    return () => {
+      active = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  const userId = user?.id;
+  useEffect(() => {
+    if (!userId) {
+      setProgress({ status: "off", rows: [] });
+      return;
+    }
+    let active = true;
+    setProgress({ status: "loading", rows: [] });
+    loadProgress().then((loaded) => {
+      if (active) setProgress(loaded);
+    });
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+  const tracking = progress.status === "ready" ? progress.rows : undefined;
+
+  const lessonTracking = (course: Course, index: number) => {
+    const lesson = course.lessonContent?.[index];
+    const courseId = course.id;
+    if (!tracking || !user || !lesson || !courseId) return undefined;
+    const key = lessonKey(lesson);
+    const isSaved = (row: ProgressRow) =>
+      row.course_id === courseId && row.lesson_key === key;
+    return {
+      done: tracking.some(isSaved),
+      onComplete: async () => {
+        await markLessonComplete(user.id, courseId, key);
+        setProgress((current) =>
+          current.status !== "ready" || current.rows.some(isSaved)
+            ? current
+            : {
+                ...current,
+                rows: [
+                  ...current.rows,
+                  { course_id: courseId, lesson_key: key, completed_at: new Date().toISOString() },
+                ],
+              },
+        );
+      },
+      onUndo: async () => {
+        await markLessonNotDone(user.id, courseId, key);
+        setProgress((current) =>
+          current.status === "ready"
+            ? { ...current, rows: current.rows.filter((row) => !isSaved(row)) }
+            : current,
+        );
+      },
+    };
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    navigateTo({ page: "home" });
+  };
 
   useEffect(() => {
     let active = true;
@@ -1244,7 +2263,6 @@ export default function App() {
         }
         if (!active) return;
         courses = payload.courses;
-        if (courses.length > 0) setSelectedCourse(courses[0]);
         setCourseLoadState("ready");
         setCourseLoadError("");
         refreshCourses((version) => version + 1);
@@ -1266,7 +2284,18 @@ export default function App() {
     };
   }, []);
 
+  void courseVersion;
+  const routeCourse =
+    "courseId" in route && route.courseId
+      ? courses.find((course) => course.id === route.courseId)
+      : undefined;
+
+  useEffect(() => {
+    document.title = pageTitle(route, routeCourse);
+  });
+
   const saveCourse = async (course: Course) => {
+    const editingCourse = page === "builder" ? routeCourse : undefined;
     // The builder has no publish step yet, so saving must keep a course visible to learners.
     const savedCourse = editingCourse?.id
       ? await updateCourse({
@@ -1279,122 +2308,233 @@ export default function App() {
     courses = editingCourse?.id
       ? courses.map((item) => (item.id === savedCourse.id ? savedCourse : item))
       : [...courses, savedCourse];
-    setSelectedCourse(savedCourse);
-    setEditingCourse(undefined);
     refreshCourses((version) => version + 1);
-    setPage("admin");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    navigateTo({ page: "admin" });
   };
   const deleteCourse = async (course: Course) => {
-    if (!window.confirm(`Delete "${course.title}"? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete "${course.title}"? This cannot be undone.`))
+      return;
     try {
       await removeCourse(course);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "The course could not be deleted.");
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "The course could not be deleted.",
+      );
       return;
     }
     courses = courses.filter((item) => item.id !== course.id);
-    if (selectedCourse.id === course.id && courses.length > 0) setSelectedCourse(courses[0]);
     refreshCourses((version) => version + 1);
-    setPage("admin");
+    navigateTo({ page: "admin" });
   };
-  navigate = (nextPage, course, lessonIndex) => {
-    if (course) setSelectedCourse(course);
-    setEditingCourse(nextPage === "builder" ? course : undefined);
-    setSelectedLessonIndex(Math.max(0, lessonIndex ?? 0));
-    setPage(nextPage);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-  void courseVersion;
+
   if (courseLoadState === "loading") {
     return (
-      <main className="auth">
-        <section>
-          <Logo />
-          <div>
-            <span className="eyebrow light">ELITE RC LEARNING HUB</span>
-            <h1>Loading shared courses.</h1>
-            <p>Connecting to the course library...</p>
-          </div>
-        </section>
-      </main>
+      <StatusScreen
+        eyebrow="ELITE RC LEARNING HUB"
+        title="Loading shared courses."
+        message="Connecting to the course library..."
+      />
     );
   }
   if (courseLoadState === "error") {
     return (
-      <main className="auth">
-        <section>
-          <Logo />
-          <div>
-            <span className="eyebrow light">COURSE LIBRARY UNAVAILABLE</span>
-            <h1>We could not load shared courses.</h1>
-            <p>{courseLoadError}</p>
-            <Button onClick={() => window.location.reload()}>Retry</Button>
-          </div>
-        </section>
-      </main>
+      <StatusScreen
+        eyebrow="COURSE LIBRARY UNAVAILABLE"
+        title="We could not load shared courses."
+        message={courseLoadError}
+      >
+        <Button onClick={() => window.location.reload()}>Retry</Button>
+      </StatusScreen>
+    );
+  }
+  // Wait for the saved sign-in before deciding whether a page needs one.
+  if (SIGNED_IN_PAGES.includes(page) && !authReady) {
+    return (
+      <StatusScreen
+        eyebrow="ELITE RC LEARNING HUB"
+        title="Checking your sign-in."
+        message="One moment..."
+      />
     );
   }
   // Staff pages stay open with an empty library so the first course can be added.
-  if (courses.length === 0 && !["admin", "builder", "instructor", "auth"].includes(page)) {
+  if (
+    courses.length === 0 &&
+    ![...STAFF_PAGES, "auth", "reset-password"].includes(page)
+  ) {
     return (
-      <main className="auth">
-        <section>
-          <Logo />
-          <div>
-            <span className="eyebrow light">COURSE LIBRARY</span>
-            <h1>No published courses yet.</h1>
-            <p>Staff can add the first course from the staff workspace.</p>
-            <Button onClick={() => setPage("auth")}>Staff sign in</Button>
-            <Button variant="outline" onClick={() => window.location.reload()}>Refresh</Button>
-          </div>
-        </section>
-      </main>
+      <StatusScreen
+        eyebrow="COURSE LIBRARY"
+        title="No published courses yet."
+        message="Staff can add the first course from the staff workspace."
+      >
+        {isStaff(user) ? (
+          <Button onClick={() => go("admin")}>Open staff workspace</Button>
+        ) : (
+          <Button onClick={() => go("auth")}>Staff sign in</Button>
+        )}
+        <Button variant="outline" onClick={() => window.location.reload()}>
+          Refresh
+        </Button>
+      </StatusScreen>
     );
   }
-  return page === "home" ? (
-    <Home />
-  ) : page === "explore" ? (
-    <Explore />
-  ) : page === "course" ? (
-    <CourseDetails course={selectedCourse} />
-  ) : page === "dashboard" ? (
-    <Dashboard />
-  ) : page === "lesson" ? (
-    <Lesson course={selectedCourse} lessonIndex={selectedLessonIndex} />
-  ) : page === "progress" ? (
-    <ProgressPage />
-  ) : page === "admin" ? (
-    <StaffOverview
-      courses={courses}
-      onNavigate={(nextPage, course) => go(nextPage, course)}
-      onSaveCourse={saveCourse}
-      onDeleteCourse={deleteCourse}
+  // Hiding staff pages here is for clarity; the backend refuses changes from non-staff.
+  if (STAFF_PAGES.includes(page) && !user) return <Auth returnTo={route} />;
+  if (STAFF_PAGES.includes(page) && !isStaff(user)) {
+    return (
+      <StatusScreen
+        eyebrow="STAFF ONLY"
+        title="This area is for staff."
+        message={`You are signed in as ${user?.email}, which is a member account. Ask an administrator if you need staff access.`}
+      >
+        <Button onClick={() => go("home")}>Back to home</Button>
+      </StatusScreen>
+    );
+  }
+
+  const courseNotFound = (
+    <NotFound
+      user={user}
+      onSignOut={signOut}
+      title="Course not found"
+      message="This course may have been removed, or the link is incomplete."
     />
-  ) : page === "builder" ? (
-    <CourseBuilderPage
-      key={editingCourse?.id ?? "new-course"}
-      courses={courses}
-      onNavigate={(nextPage, course) => go(nextPage, course)}
-      onSaveCourse={saveCourse}
-      onDeleteCourse={deleteCourse}
-      editingCourse={editingCourse}
-    />
-  ) : page === "preview" ? (
-    <StaffCoursePreview
-      course={selectedCourse}
-      onNavigate={(nextPage, course) => go(nextPage, course)}
-    />
-  ) : page === "instructor" ? (
-    <InstructorWorkspace
-      courses={courses}
-      onNavigate={(nextPage, course) => go(nextPage, course)}
-      onSaveCourse={saveCourse}
-      onDeleteCourse={deleteCourse}
-    />
-  ) : page === "auth" ? (
-    <Auth />
-  ) : (
-    <ProfilePage />
+  );
+  const staffAccount = user && {
+    name: memberName(user),
+    initials: memberInitials(user),
+    onViewSite: () => go("home"),
+    onSignOut: () => void signOut(),
+  };
+  const staffNavigate = (nextPage: Page, course?: Course) => go(nextPage, course);
+
+  let content: ReactNode;
+  switch (route.page) {
+    case "home":
+      content = <Home user={user} onSignOut={signOut} />;
+      break;
+    case "about":
+      content = <About user={user} onSignOut={signOut} />;
+      break;
+    case "explore":
+      content = (
+        <Explore
+          key={routePath(route)}
+          filters={route}
+          user={user}
+          onSignOut={signOut}
+        />
+      );
+      break;
+    case "course":
+      content = routeCourse ? (
+        <CourseDetails
+          course={routeCourse}
+          user={user}
+          onSignOut={signOut}
+          tracking={tracking}
+        />
+      ) : (
+        courseNotFound
+      );
+      break;
+    case "lesson":
+      content = !routeCourse ? (
+        courseNotFound
+      ) : route.lessonIndex < lessonCount(routeCourse) ? (
+        <Lesson
+          key={`${routeCourse.id}-${route.lessonIndex}`}
+          course={routeCourse}
+          lessonIndex={route.lessonIndex}
+          tracking={lessonTracking(routeCourse, route.lessonIndex)}
+          signedIn={Boolean(user)}
+        />
+      ) : (
+        <NotFound
+          user={user}
+          onSignOut={signOut}
+          title="Lesson not found"
+          message={`${routeCourse.title} has ${lessonCount(routeCourse)} lessons.`}
+        />
+      );
+      break;
+    case "dashboard":
+      content = user ? (
+        <Dashboard user={user} onSignOut={signOut} progress={progress} />
+      ) : (
+        <Auth returnTo={route} />
+      );
+      break;
+    case "progress":
+      content = user ? (
+        <ProgressPage user={user} onSignOut={signOut} progress={progress} />
+      ) : (
+        <Auth returnTo={route} />
+      );
+      break;
+    case "profile":
+      content = user ? (
+        <ProfilePage user={user} onSignOut={signOut} />
+      ) : (
+        <Auth returnTo={route} />
+      );
+      break;
+    case "auth":
+      content = (
+        <Auth
+          key={`${route.register}-${route.next}`}
+          startRegistering={route.register}
+          returnTo={route.next ? parsePath(route.next) : undefined}
+        />
+      );
+      break;
+    case "reset-password":
+      content = <ResetPassword />;
+      break;
+    case "admin":
+      content = (
+        <StaffOverview
+          courses={courses}
+          onNavigate={staffNavigate}
+          onSaveCourse={saveCourse}
+          onDeleteCourse={deleteCourse}
+        />
+      );
+      break;
+    case "instructor":
+      content = (
+        <InstructorWorkspace
+          courses={courses}
+          onNavigate={staffNavigate}
+          onSaveCourse={saveCourse}
+          onDeleteCourse={deleteCourse}
+        />
+      );
+      break;
+    case "builder":
+      content =
+        route.courseId && !routeCourse ? (
+          courseNotFound
+        ) : (
+          <CourseBuilderPage
+            key={routeCourse?.id ?? "new-course"}
+            courses={courses}
+            onNavigate={staffNavigate}
+            onSaveCourse={saveCourse}
+            onDeleteCourse={deleteCourse}
+            editingCourse={routeCourse}
+          />
+        );
+      break;
+    default:
+      content = <NotFound user={user} onSignOut={signOut} />;
+  }
+  return (
+    <StaffAccountContext.Provider value={staffAccount}>
+      {content}
+    </StaffAccountContext.Provider>
   );
 }
