@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: elite-rc-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    pullRequestPreviewsEnabled: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: FRONTEND_ORIGINS
+        sync: false
+      - key: FRONTEND_ORIGIN_PATTERNS
+        sync: false
+

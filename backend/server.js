@@ -9,9 +9,61 @@ dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT || 5000);
-const allowedOrigin = process.env.FRONTEND_ORIGIN || "*";
 
-app.use(cors({ origin: allowedOrigin }));
+function asPattern(value) {
+  return String(value)
+    .trim()
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*");
+}
+
+function getAllowedOriginPatterns() {
+  return (process.env.FRONTEND_ORIGIN_PATTERNS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((pattern) => new RegExp(`^${asPattern(pattern)}$`, "i"));
+}
+
+function getAllowedOrigins() {
+  const configured = [
+    process.env.FRONTEND_ORIGIN,
+    process.env.FRONTEND_ORIGINS,
+  ]
+    .filter(Boolean)
+    .flatMap((value) => String(value).split(","))
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (configured.length) {
+    return [...new Set(configured)];
+  }
+
+  // Safe local defaults for development only.
+  return ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://127.0.0.1:4173"];
+}
+
+const allowedOrigins = getAllowedOrigins();
+const allowedOriginPatterns = getAllowedOriginPatterns();
+
+app.use(cors({
+  origin(origin, callback) {
+    // Requests from tools like curl or same-origin server calls may omit Origin.
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    if (allowedOriginPatterns.some((pattern) => pattern.test(origin))) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error("Not allowed by CORS."));
+  },
+}));
 app.use(express.json({ limit: "1mb" }));
 
 const supabaseUrl = process.env.SUPABASE_URL;
