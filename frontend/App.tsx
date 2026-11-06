@@ -2112,7 +2112,13 @@ function StatusScreen({
   );
 }
 
-const SIGNED_IN_PAGES: Page[] = ["dashboard", "progress", "profile", ...STAFF_PAGES];
+const SIGNED_IN_PAGES: Page[] = [
+  "dashboard",
+  "progress",
+  "profile",
+  "lesson",
+  ...STAFF_PAGES,
+];
 
 function lessonCount(course: Course) {
   return course.lessonContent?.length ?? course.lessons;
@@ -2381,6 +2387,7 @@ export default function App() {
       </StatusScreen>
     );
   }
+  if (page === "lesson" && !user) return <Auth returnTo={route} />;
   // Hiding staff pages here is for clarity; the backend refuses changes from non-staff.
   if (STAFF_PAGES.includes(page) && !user) return <Auth returnTo={route} />;
   if (STAFF_PAGES.includes(page) && !isStaff(user)) {
