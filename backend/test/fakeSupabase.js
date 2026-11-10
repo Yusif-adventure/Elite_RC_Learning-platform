@@ -40,6 +40,34 @@ const TABLE_RULES = {
   },
   // From supabase/003_lesson_progress.sql: deleting a course removes its progress.
   lesson_progress: { defaults: {}, parent: ["course_id", "courses"] },
+  quizzes: { defaults: { created_by: null }, parent: null },
+  questions: { defaults: { explanation: null, position: 0 }, parent: ["quiz_id", "quizzes"] },
+  answer_choices: { defaults: { is_correct: false, position: 0 }, parent: ["question_id", "questions"] },
+  lesson_assessments: {
+    defaults: {},
+    parent: ["lesson_id", "course_lessons"],
+    unique: ["lesson_id"],
+  },
+  final_exams: {
+    defaults: { pass_mark: 70 },
+    parent: ["course_id", "courses"],
+    unique: ["course_id"],
+  },
+  assessment_attempts: {
+    defaults: { answers: {}, passed: false },
+    parent: ["quiz_id", "quizzes"],
+    unique: ["user_id", "quiz_id", "attempt_number"],
+  },
+  course_completions: {
+    defaults: {},
+    parent: ["course_id", "courses"],
+    unique: ["user_id", "course_id"],
+  },
+  certificates: {
+    defaults: {},
+    parent: ["course_id", "courses"],
+    unique: ["user_id", "course_id"],
+  },
 };
 
 // Like Supabase Auth's admin API errors, e.g. for an id that matches no account.
@@ -191,6 +219,12 @@ export async function startFakeSupabase({ serviceKey }) {
           // supabase/001 keeps courses.updated_at current with a trigger.
           ...(table === "courses" ? { updated_at: createdAt } : {}),
         };
+        if (table === "certificates" && !row.certificate_identifier) {
+          row.certificate_identifier = randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase();
+        }
+        if (table === "assessment_attempts" && !row.submitted_at) {
+          row.submitted_at = createdAt;
+        }
         const violation = findViolation(table, row);
         if (violation) {
           db[table] = stagedRows;

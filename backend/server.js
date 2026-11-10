@@ -174,6 +174,26 @@ function isStaff(user) {
   return roleOf(user) !== "member";
 }
 
+async function requireUser(req, res, next) {
+  if (!requireSupabase(res)) return;
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+  if (!token) {
+    res.status(401).json({ error: "Sign in to continue." });
+    return;
+  }
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error && !(error.status >= 400 && error.status < 500)) {
+    res.status(503).json({ error: "We could not check your sign-in. Please try again in a moment." });
+    return;
+  }
+  if (error || !data?.user) {
+    res.status(401).json({ error: "Your sign-in has expired. Sign in again to continue." });
+    return;
+  }
+  req.user = data.user;
+  next();
+}
+
 async function requireStaff(req, res, next) {
   if (!requireSupabase(res)) return;
   const token = /^Bearer (.+)$/.exec(req.get("authorization") || "")?.[1];
@@ -419,6 +439,200 @@ async function restoreCourse(courseId, previous) {
   }
 }
 
+function validateQuiz(input) {
+  if (!input || typeof input !== "object") return "An assessment object is required.";
+  if (input.title !== undefined && (typeof input.title !== "string" || !input.title.trim())) {
+    return "Assessment title is required.";
+  }
+  if (!Array.isArray(input.questions) || input.questions.length === 0) {
+    return "An assessment needs at least one question.";
+  }
+  for (const [index, question] of input.questions.entries()) {
+    if (typeof question?.questionText !== "string" || !question.questionText.trim()) {
+      return `Question ${index + 1} needs question text.`;
+    }
+    if (!Array.isArray(question.choices) || question.choices.length < 2) {
+      return `Question ${index + 1} needs at least two answer choices.`;
+    }
+    const correct = question.choices.filter((choice) => choice?.isCorrect === true);
+    if (correct.length !== 1) {
+      return `Question ${index + 1} must have exactly one correct answer.`;
+    }
+    if (question.choices.some((choice) => typeof choice?.text !== "string" || !choice.text.trim())) {
+      return `Every answer choice for question ${index + 1} needs text.`;
+    }
+  }
+  return null;
+}
+
+function publicQuiz(quiz, questions, choices, includeAnswers = false) {
+  return {
+    id: quiz.id,
+    title: quiz.title,
+    questions: questions
+      .sort((a, b) => a.position - b.position)
+      .map((question) => ({
+        id: question.id,
+        questionText: question.question_text,
+        explanation: question.explanation,
+        position: question.position,
+        choices: choices
+          .filter((choice) => choice.question_id === question.id)
+          .sort((a, b) => a.position - b.position)
+          .map((choice) => ({
+            id: choice.id,
+            text: choice.choice_text,
+            position: choice.position,
+            ...(includeAnswers ? { isCorrect: choice.is_correct } : {}),
+          })),
+      })),
+  };
+}
+
+async function readQuiz(quizId, includeAnswers = false) {
+  const { data: quiz, error: quizError } = await supabaseAdmin
+    .from("quizzes")
+    .select("id, title")
+    .eq("id", quizId)
+    .single();
+  if (quizError) throw quizError;
+  const { data: questions, error: questionsError } = await supabaseAdmin
+    .from("questions")
+    .select("id, quiz_id, question_text, explanation, position")
+    .eq("quiz_id", quizId)
+    .order("position");
+  if (questionsError) throw questionsError;
+  const questionIds = (questions || []).map((question) => question.id);
+  let choices = [];
+  for (const questionId of questionIds) {
+    const { data, error } = await supabaseAdmin
+      .from("answer_choices")
+      .select("id, question_id, choice_text, position, is_correct")
+      .eq("question_id", questionId)
+      .order("position");
+    if (error) throw error;
+    choices = choices.concat(data || []);
+  }
+  return publicQuiz(quiz, questions || [], choices, includeAnswers);
+}
+
+async function saveQuizQuestions(quizId, questions) {
+  const { error: deleteError } = await supabaseAdmin.from("questions").delete().eq("quiz_id", quizId);
+  if (deleteError) throw deleteError;
+  for (const [questionPosition, question] of questions.entries()) {
+    const { data: savedQuestion, error: questionError } = await supabaseAdmin
+      .from("questions")
+      .insert({
+        quiz_id: quizId,
+        question_text: question.questionText.trim(),
+        explanation: question.explanation?.trim() || null,
+        position: questionPosition,
+      })
+      .select("id")
+      .single();
+    if (questionError) throw questionError;
+    const choices = question.choices.map((choice, position) => ({
+      question_id: savedQuestion.id,
+      choice_text: choice.text.trim(),
+      is_correct: choice.isCorrect === true,
+      position,
+    }));
+    const { error: choicesError } = await supabaseAdmin.from("answer_choices").insert(choices);
+    if (choicesError) throw choicesError;
+  }
+}
+
+async function createQuiz(input, userId) {
+  const { data, error } = await supabaseAdmin
+    .from("quizzes")
+    .insert({ title: input.title?.trim() || "Assessment", created_by: userId })
+    .select("id")
+    .single();
+  if (error) throw error;
+  try {
+    await saveQuizQuestions(data.id, input.questions);
+    return data.id;
+  } catch (error) {
+    await supabaseAdmin.from("quizzes").delete().eq("id", data.id);
+    throw error;
+  }
+}
+
+async function readSingleReference(table, column, value) {
+  const { data, error } = await supabaseAdmin.from(table).select("*").eq(column, value).single();
+  if (error) throw error;
+  return data;
+}
+
+async function assessmentForQuiz(quizId) {
+  try {
+    const lesson = await readSingleReference("lesson_assessments", "quiz_id", quizId);
+    return { type: "lesson", lessonId: lesson.lesson_id };
+  } catch (error) {
+    if (error.code !== "PGRST116") throw error;
+  }
+  const finalExam = await readSingleReference("final_exams", "quiz_id", quizId);
+  return { type: "final", courseId: finalExam.course_id, passMark: Number(finalExam.pass_mark) };
+}
+
+function sendAssessmentError(res, error) {
+  if (error.code === "23505") {
+    res.status(409).json({ error: "That assessment already exists." });
+    return;
+  }
+  if (error.code === "23503" || error.code === "PGRST116" || error.code === "22P02") {
+    res.status(404).json({ error: "Assessment or course content was not found." });
+    return;
+  }
+  res.status(500).json({ error: getErrorMessage(error) });
+}
+
+async function createLessonAssessment(req, res) {
+  if (!requireSupabaseAdmin(res)) return;
+  const validationError = validateQuiz(req.body);
+  if (validationError) {
+    res.status(400).json({ error: validationError });
+    return;
+  }
+  try {
+    const quizId = await createQuiz(req.body, req.user.id);
+    const { error } = await supabaseAdmin.from("lesson_assessments").insert({
+      lesson_id: req.params.lessonId,
+      quiz_id: quizId,
+    });
+    if (error) throw error;
+    res.status(201).json({ assessment: await readQuiz(quizId) });
+  } catch (error) {
+    sendAssessmentError(res, error);
+  }
+}
+
+async function createFinalExam(req, res) {
+  if (!requireSupabaseAdmin(res)) return;
+  const validationError = validateQuiz(req.body);
+  const passMark = Number(req.body?.passMark ?? 70);
+  if (validationError) {
+    res.status(400).json({ error: validationError });
+    return;
+  }
+  if (!Number.isFinite(passMark) || passMark < 0 || passMark > 100) {
+    res.status(400).json({ error: "Pass mark must be a percentage from 0 to 100." });
+    return;
+  }
+  try {
+    const quizId = await createQuiz(req.body, req.user.id);
+    const { error } = await supabaseAdmin.from("final_exams").insert({
+      course_id: req.params.courseId,
+      quiz_id: quizId,
+      pass_mark: passMark,
+    });
+    if (error) throw error;
+    res.status(201).json({ exam: { ...(await readQuiz(quizId)), passMark } });
+  } catch (error) {
+    sendAssessmentError(res, error);
+  }
+}
+
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "elite-rc-backend", timestamp: new Date().toISOString() });
 });
@@ -527,6 +741,321 @@ app.delete("/api/courses/:id", requireStaff, async (req, res) => {
     return;
   }
   res.status(204).end();
+});
+
+app.get("/api/lessons/:lessonId/assessment", requireUser, async (req, res) => {
+  try {
+    const assessment = await readSingleReference("lesson_assessments", "lesson_id", req.params.lessonId);
+    res.json({ assessment: await readQuiz(assessment.quiz_id) });
+  } catch (error) {
+    if (error.code === "PGRST116") {
+      res.status(404).json({ error: "This lesson does not have an assessment." });
+      return;
+    }
+    sendAssessmentError(res, error);
+  }
+});
+
+app.get("/api/courses/:courseId/final-exam", requireUser, async (req, res) => {
+  try {
+    const exam = await readSingleReference("final_exams", "course_id", req.params.courseId);
+    res.json({ exam: { ...(await readQuiz(exam.quiz_id)), passMark: Number(exam.pass_mark) } });
+  } catch (error) {
+    if (error.code === "PGRST116") {
+      res.status(404).json({ error: "This course does not have a final exam." });
+      return;
+    }
+    sendAssessmentError(res, error);
+  }
+});
+
+app.post("/api/lessons/:lessonId/assessment", requireStaff, createLessonAssessment);
+app.post("/api/courses/:courseId/final-exam", requireStaff, createFinalExam);
+
+app.put("/api/courses/:courseId/final-exam", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const validationError = validateQuiz(req.body);
+  const passMark = Number(req.body?.passMark ?? 70);
+  if (validationError) {
+    res.status(400).json({ error: validationError });
+    return;
+  }
+  if (!Number.isFinite(passMark) || passMark < 0 || passMark > 100) {
+    res.status(400).json({ error: "Pass mark must be a percentage from 0 to 100." });
+    return;
+  }
+  try {
+    const exam = await readSingleReference("final_exams", "course_id", req.params.courseId);
+    const { error: examError } = await supabaseAdmin
+      .from("final_exams")
+      .update({ pass_mark: passMark })
+      .eq("course_id", req.params.courseId);
+    if (examError) throw examError;
+    const { error: quizError } = await supabaseAdmin
+      .from("quizzes")
+      .update({ title: req.body.title?.trim() || "Final exam" })
+      .eq("id", exam.quiz_id);
+    if (quizError) throw quizError;
+    await saveQuizQuestions(exam.quiz_id, req.body.questions);
+    res.json({ exam: { ...(await readQuiz(exam.quiz_id)), passMark } });
+  } catch (error) {
+    sendAssessmentError(res, error);
+  }
+});
+
+app.put("/api/quizzes/:quizId", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const validationError = validateQuiz(req.body);
+  if (validationError) {
+    res.status(400).json({ error: validationError });
+    return;
+  }
+  try {
+    const { error } = await supabaseAdmin
+      .from("quizzes")
+      .update({ title: req.body.title?.trim() || "Assessment" })
+      .eq("id", req.params.quizId);
+    if (error) throw error;
+    await saveQuizQuestions(req.params.quizId, req.body.questions);
+    res.json({ assessment: await readQuiz(req.params.quizId) });
+  } catch (error) {
+    sendAssessmentError(res, error);
+  }
+});
+
+app.put("/api/quizzes/:quizId/questions/reorder", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  if (!Array.isArray(req.body?.questionIds) || req.body.questionIds.length === 0) {
+    res.status(400).json({ error: "Question IDs must be a non-empty array." });
+    return;
+  }
+  try {
+    for (const [position, id] of req.body.questionIds.entries()) {
+      const { error } = await supabaseAdmin.from("questions").update({ position }).eq("id", id).eq("quiz_id", req.params.quizId);
+      if (error) throw error;
+    }
+    res.json({ assessment: await readQuiz(req.params.quizId) });
+  } catch (error) {
+    sendAssessmentError(res, error);
+  }
+});
+
+app.post("/api/quizzes/:quizId/questions", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const validationError = validateQuiz({ questions: [req.body] });
+  if (validationError) {
+    res.status(400).json({ error: validationError });
+    return;
+  }
+  try {
+    const { data: existing, error: existingError } = await supabaseAdmin
+      .from("questions")
+      .select("position")
+      .eq("quiz_id", req.params.quizId)
+      .order("position", { ascending: false })
+      .limit(1);
+    if (existingError) throw existingError;
+    const position = existing?.length ? existing[0].position + 1 : 0;
+    const { data: question, error: questionError } = await supabaseAdmin
+      .from("questions")
+      .insert({
+        quiz_id: req.params.quizId,
+        question_text: req.body.questionText.trim(),
+        explanation: req.body.explanation?.trim() || null,
+        position,
+      })
+      .select("id")
+      .single();
+    if (questionError) throw questionError;
+    const { error: choicesError } = await supabaseAdmin.from("answer_choices").insert(
+      req.body.choices.map((choice, choicePosition) => ({
+        question_id: question.id,
+        choice_text: choice.text.trim(),
+        is_correct: choice.isCorrect === true,
+        position: choicePosition,
+      })),
+    );
+    if (choicesError) throw choicesError;
+    res.status(201).json({ assessment: await readQuiz(req.params.quizId) });
+  } catch (error) {
+    sendAssessmentError(res, error);
+  }
+});
+
+app.put("/api/questions/:questionId", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const validationError = validateQuiz({ questions: [req.body] });
+  if (validationError) {
+    res.status(400).json({ error: validationError });
+    return;
+  }
+  try {
+    const { data: question, error: findError } = await supabaseAdmin
+      .from("questions")
+      .select("quiz_id")
+      .eq("id", req.params.questionId)
+      .single();
+    if (findError) throw findError;
+    const { error: updateError } = await supabaseAdmin
+      .from("questions")
+      .update({
+        question_text: req.body.questionText.trim(),
+        explanation: req.body.explanation?.trim() || null,
+      })
+      .eq("id", req.params.questionId);
+    if (updateError) throw updateError;
+    const { error: deleteError } = await supabaseAdmin
+      .from("answer_choices")
+      .delete()
+      .eq("question_id", req.params.questionId);
+    if (deleteError) throw deleteError;
+    const { error: choicesError } = await supabaseAdmin.from("answer_choices").insert(
+      req.body.choices.map((choice, position) => ({
+        question_id: req.params.questionId,
+        choice_text: choice.text.trim(),
+        is_correct: choice.isCorrect === true,
+        position,
+      })),
+    );
+    if (choicesError) throw choicesError;
+    res.json({ assessment: await readQuiz(question.quiz_id) });
+  } catch (error) {
+    sendAssessmentError(res, error);
+  }
+});
+
+app.delete("/api/questions/:questionId", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const { error } = await supabaseAdmin.from("questions").delete().eq("id", req.params.questionId);
+  if (error) {
+    sendAssessmentError(res, error);
+    return;
+  }
+  res.status(204).end();
+});
+
+app.delete("/api/quizzes/:quizId", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const { error } = await supabaseAdmin.from("quizzes").delete().eq("id", req.params.quizId);
+  if (error) {
+    sendAssessmentError(res, error);
+    return;
+  }
+  res.status(204).end();
+});
+
+app.post("/api/quizzes/:quizId/attempts", requireUser, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  try {
+    const assessment = await assessmentForQuiz(req.params.quizId);
+    const quiz = await readQuiz(req.params.quizId, true);
+    const answers = req.body?.answers;
+    if (!answers || typeof answers !== "object" || Array.isArray(answers)) {
+      res.status(400).json({ error: "Answers must be an object keyed by question ID." });
+      return;
+    }
+    const answerRows = [];
+    for (const question of quiz.questions) {
+      const selectedId = answers[question.id];
+      const selected = question.choices.find((choice) => choice.id === selectedId);
+      if (!selected) {
+        res.status(400).json({ error: "Answer every question before submitting." });
+        return;
+      }
+      answerRows.push({ question, selected });
+    }
+
+    const { data: previousAttempts, error: attemptsError } = await supabaseAdmin
+      .from("assessment_attempts")
+      .select("attempt_number, passed")
+      .eq("user_id", req.user.id)
+      .eq("quiz_id", req.params.quizId)
+      .order("attempt_number", { ascending: false });
+    if (attemptsError) throw attemptsError;
+    const attempts = previousAttempts || [];
+    if (assessment.type === "final" && (attempts.length >= 3 || attempts.some((attempt) => attempt.passed))) {
+      res.status(409).json({ error: "The final exam attempt limit has been reached or the exam was already passed." });
+      return;
+    }
+    const score = Math.round(
+      (answerRows.filter(({ selected }) => selected.isCorrect).length / answerRows.length) * 10000,
+    ) / 100;
+    const passed = assessment.type === "lesson" ? true : score >= assessment.passMark;
+    const attemptNumber = attempts.length + 1;
+    const { data: attempt, error: insertError } = await supabaseAdmin
+      .from("assessment_attempts")
+      .insert({
+        user_id: req.user.id,
+        quiz_id: req.params.quizId,
+        assessment_type: assessment.type,
+        attempt_number: attemptNumber,
+        answers,
+        score,
+        passed,
+      })
+      .select("id, attempt_number, score, passed, submitted_at")
+      .single();
+    if (insertError) throw insertError;
+
+    let certificate = null;
+    if (assessment.type === "final" && passed) {
+      const { error: completionError } = await supabaseAdmin
+        .from("course_completions")
+        .insert({ user_id: req.user.id, course_id: assessment.courseId });
+      if (completionError && completionError.code !== "23505") throw completionError;
+      const { data: certificateRow, error: certificateError } = await supabaseAdmin
+        .from("certificates")
+        .insert({ user_id: req.user.id, course_id: assessment.courseId })
+        .select("id, certificate_identifier, issued_at")
+        .single();
+      if (certificateError && certificateError.code !== "23505") throw certificateError;
+      if (certificateRow) certificate = certificateRow;
+      if (certificateError?.code === "23505") {
+        const { data, error } = await supabaseAdmin
+          .from("certificates")
+          .select("id, certificate_identifier, issued_at")
+          .eq("user_id", req.user.id)
+          .eq("course_id", assessment.courseId)
+          .single();
+        if (error) throw error;
+        certificate = data;
+      }
+    }
+
+    res.status(201).json({
+      attempt,
+      attemptsRemaining: assessment.type === "final" ? 3 - attemptNumber : null,
+      passed,
+      certificate,
+      review: answerRows.map(({ question, selected }) => ({
+        questionId: question.id,
+        selectedChoiceId: selected.id,
+        correctChoiceId: question.choices.find((choice) => choice.isCorrect).id,
+        correct: selected.isCorrect,
+        explanation: question.explanation,
+      })),
+    });
+  } catch (error) {
+    sendAssessmentError(res, error);
+  }
+});
+
+app.get("/api/staff/certificates/:identifier", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const { data, error } = await supabaseAdmin
+    .from("certificates")
+    .select("id, user_id, course_id, certificate_identifier, issued_at")
+    .eq("certificate_identifier", req.params.identifier)
+    .single();
+  if (error?.code === "PGRST116") {
+    res.status(404).json({ error: "Certificate not found.", valid: false });
+    return;
+  }
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  res.json({ valid: true, certificate: data });
 });
 
 // Staff dashboard. These read across every member, so they use the secret key,
