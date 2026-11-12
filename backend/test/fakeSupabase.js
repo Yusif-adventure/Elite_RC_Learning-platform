@@ -49,7 +49,7 @@ const TABLE_RULES = {
     unique: ["lesson_id"],
   },
   final_exams: {
-    defaults: { pass_mark: 70 },
+    defaults: { pass_mark: 80 },
     parent: ["course_id", "courses"],
     unique: ["course_id"],
   },

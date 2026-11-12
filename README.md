@@ -428,6 +428,9 @@ src/
 - [`supabase/004_assessments.sql`](./supabase/004_assessments.sql): quizzes,
   questions, answer choices, assessment attempts, final exams, course
   completion, certificates, indexes, and assessment row-level security.
+- [`supabase/005_assessment_fixes.sql`](./supabase/005_assessment_fixes.sql):
+  keeps answer keys, explanations, and scores out of reach of the browser, and
+  sets the final-exam pass mark default to 80%.
 
 ## Running the project
 
@@ -553,10 +556,13 @@ a sign-in they answer `401`; with a member's sign-in they answer `403`.
    **My learning** says progress tracking is not switched on yet.
 6. Run [`supabase/004_assessments.sql`](./supabase/004_assessments.sql) to
    enable quizzes, final exams, attempts, completion, and certificates.
-7. Copy the project URL, anon key, and service role key into `backend/.env`,
+7. Run [`supabase/005_assessment_fixes.sql`](./supabase/005_assessment_fixes.sql).
+   It closes direct database access to answer keys, explanations, and attempt
+   scores, which 004 left open.
+8. Copy the project URL, anon key, and service role key into `backend/.env`,
    and the URL and anon key into `frontend/.env`.
-8. Start the backend and verify `GET http://localhost:5000/api/status`.
-9. Make at least one staff account (see [Staff access](#staff-access)).
+9. Start the backend and verify `GET http://localhost:5000/api/status`.
+10. Make at least one staff account (see [Staff access](#staff-access)).
 
 The first migration creates normalized course, objective, section, lesson, and
 resource tables. It also seeds two courses and creates public-read storage
@@ -569,7 +575,26 @@ rows. Lessons are identified by section and title, because saving a course
 replaces its lessons, so renaming a lesson resets its progress. The fourth
 creates assessment content and attempt records; answer keys are available only
 to the backend service role, which calculates scores and enforces final-exam
-limits before returning feedback to learners.
+limits before returning feedback to learners. The fifth tightens those rules.
+
+### Assessment rules the backend enforces
+
+- A lesson quiz has 10 to 25 questions and can be retaken without limit.
+- A final exam has exactly 50 questions, a pass mark that defaults to 80%,
+  and three attempts. Once a member passes, no further attempts are taken.
+- Every question has at least two choices and exactly one correct choice.
+- Members never receive `isCorrect` or `explanation` before submitting. The
+  attempt response returns the review, including the correct choice and the
+  explanation. Staff loading an assessment get both so they can edit it.
+- Members can only load or answer assessments in published courses.
+- Sending a question or choice back with its `id` updates it in place, so
+  earlier attempts still match the questions they answered.
+- Each lesson in `lessonContent` has an `id`, which is used to load its quiz.
+  The id changes whenever the course is saved. Saving a course puts each quiz
+  back on the lesson with the same section and title, or on the lesson that
+  sends the quiz's id back as `quizId` (so a renamed lesson keeps its quiz).
+- If the backend cannot finish a submission (for example, the certificate
+  cannot be issued), the attempt is not counted.
 
 ### Staff access
 

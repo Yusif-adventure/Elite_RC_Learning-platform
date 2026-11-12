@@ -138,6 +138,12 @@ async function createCourse(overrides) {
   return (await response.json()).course;
 }
 
+// Lesson ids change whenever a course is saved, so content is compared without them.
+function withoutLessonIds(saved) {
+  for (const lesson of saved.lessonContent) assert.equal(typeof lesson.id, "string");
+  return { ...saved, lessonContent: saved.lessonContent.map(({ id, ...lesson }) => lesson) };
+}
+
 async function readCourse(id) {
   const response = await fetch(`${api}/api/courses/${id}`);
   assert.equal(response.status, 200);
@@ -153,19 +159,48 @@ function upload(kind, name, size = 10, { token = STAFF_TOKEN, base = api } = {})
   });
 }
 
-function assessment(title = "Knowledge check", passMark) {
+// Lesson quizzes need 10 to 25 questions and final exams exactly 50. The first
+// choice of every question is the correct one.
+function assessment(title = "Knowledge check", passMark, count = title === "Final exam" ? 50 : 10) {
   return {
     title,
     ...(passMark === undefined ? {} : { passMark }),
-    questions: [{
-      questionText: "Which control keeps the aircraft level?",
+    questions: Array.from({ length: count }, (_, index) => ({
+      questionText: `Question ${index + 1}: which control keeps the aircraft level?`,
       explanation: "The ailerons control roll.",
       choices: [
         { text: "Ailerons", isCorrect: true },
         { text: "Landing gear", isCorrect: false },
       ],
-    }],
+    })),
   };
+}
+
+// Answers every question, getting the first `correctCount` right.
+function answersFor(quiz, correctCount = quiz.questions.length) {
+  return Object.fromEntries(
+    quiz.questions.map((question, index) => [question.id, question.choices[index < correctCount ? 0 : 1].id]),
+  );
+}
+
+async function createLessonQuiz(lessonId, body = assessment()) {
+  const response = await sendJson("POST", `/api/lessons/${lessonId}/assessment`, body);
+  assert.equal(response.status, 201);
+  return (await response.json()).assessment;
+}
+
+async function createFinalExam(courseId, passMark) {
+  const response = await sendJson("POST", `/api/courses/${courseId}/final-exam`, assessment("Final exam", passMark));
+  assert.equal(response.status, 201);
+  return (await response.json()).exam;
+}
+
+function submit(quizId, answers, { token = MEMBER_TOKEN } = {}) {
+  return sendJson("POST", `/api/quizzes/${quizId}/attempts`, { answers }, { token });
+}
+
+function loadLessonQuiz(lessonId, { token = MEMBER_TOKEN } = {}) {
+  return fetch(`${api}/api/lessons/${lessonId}/assessment`, { headers: signedIn(token) });
 }
 
 function sendJson(method, path, body, { token = STAFF_TOKEN, base = api } = {}) {
@@ -195,7 +230,7 @@ test("a created course comes back whole and appears in the shared list", async (
   assert.equal(created.status, "published");
   assert.deepEqual(created.objectives, ["Fly safely"]);
   assert.deepEqual(created.sections, ["Setup", "Flying"]);
-  assert.deepEqual(created.lessonContent, [
+  assert.deepEqual(withoutLessonIds(created).lessonContent, [
     {
       title: "Welcome",
       section: "Setup",
@@ -219,7 +254,7 @@ test("titles with stray spaces keep their lessons and files", async () => {
     ],
   });
 
-  assert.deepEqual(created.lessonContent, [
+  assert.deepEqual(withoutLessonIds(created).lessonContent, [
     {
       title: "Welcome",
       section: "Setup",
@@ -295,7 +330,7 @@ for (const [description, overrides] of invalidCourses) {
     const response = await sendCourse("PUT", `/api/courses/${created.id}`, course(overrides));
 
     await assertJsonError(response, 400);
-    assert.deepEqual(await readCourse(created.id), created);
+    assert.deepEqual(withoutLessonIds(await readCourse(created.id)), withoutLessonIds(created));
   });
 }
 
@@ -318,7 +353,7 @@ test("an edit replaces the course's content and keeps its id", async () => {
   assert.equal(saved.title, "Flight Basics 2");
   assert.deepEqual(saved.objectives, ["Land safely"]);
   assert.deepEqual(saved.sections, ["Landing"]);
-  assert.deepEqual(saved.lessonContent, [{ title: "Approach", section: "Landing", slides: [] }]);
+  assert.deepEqual(withoutLessonIds(saved).lessonContent, [{ title: "Approach", section: "Landing", slides: [] }]);
   assert.equal(fake.db.courses.length, 1);
 });
 
@@ -345,7 +380,7 @@ for (const table of ["course_objectives", "course_sections", "course_lessons", "
     );
 
     assert.match(await assertJsonError(response, 500), /previous version/i);
-    assert.deepEqual(await readCourse(created.id), created);
+    assert.deepEqual(withoutLessonIds(await readCourse(created.id)), withoutLessonIds(created));
   });
 }
 
@@ -562,7 +597,7 @@ for (const [who, token, status] of outsiders) {
       await assertJsonError(response, status);
     }
     assert.equal(fake.db.courses.length, 1);
-    assert.deepEqual(await readCourse(created.id), created);
+    assert.deepEqual(withoutLessonIds(await readCourse(created.id)), withoutLessonIds(created));
     assert.equal(fake.files.size, 0);
   });
 }
@@ -787,84 +822,219 @@ test("changing the role of an account that does not exist returns not found", as
 });
 
 test("lesson assessments hide answer keys and return answer feedback after submission", async () => {
-  const created = await createCourse();
+  await createCourse();
   const lessonId = fake.db.course_lessons[0].id;
-  const createResponse = await sendJson("POST", `/api/lessons/${lessonId}/assessment`, assessment());
+  const created = await createLessonQuiz(lessonId);
 
-  assert.equal(createResponse.status, 201);
-  const assessmentId = (await createResponse.json()).assessment.id;
-  const loadResponse = await fetch(`${api}/api/lessons/${lessonId}/assessment`, {
-    headers: signedIn(MEMBER_TOKEN),
-  });
+  const loadResponse = await loadLessonQuiz(lessonId);
   const loaded = (await loadResponse.json()).assessment;
   assert.equal(loadResponse.status, 200);
-  assert.equal(loaded.questions[0].choices[0].isCorrect, undefined);
+  assert.equal(loaded.questions.length, 10);
+  for (const question of loaded.questions) {
+    assert.equal("explanation" in question, false);
+    for (const choice of question.choices) assert.equal("isCorrect" in choice, false);
+  }
 
-  const answer = {};
-  answer[loaded.questions[0].id] = loaded.questions[0].choices[1].id;
-  const submitResponse = await sendJson("POST", `/api/quizzes/${assessmentId}/attempts`, { answers: answer }, {
-    token: MEMBER_TOKEN,
-  });
+  const submitResponse = await submit(created.id, answersFor(loaded, 7));
   const result = await submitResponse.json();
   assert.equal(submitResponse.status, 201);
   assert.equal(result.passed, true);
-  assert.equal(result.review[0].correct, false);
-  assert.equal(result.review[0].correctChoiceId, loaded.questions[0].choices[0].id);
-  assert.equal(created.title, "Flight Basics");
+  assert.equal(result.attempt.score, 70);
+  assert.equal(result.review[0].correct, true);
+  assert.equal(result.review[9].correct, false);
+  assert.equal(result.review[9].correctChoiceId, loaded.questions[9].choices[0].id);
+  assert.equal(result.review[9].explanation, "The ailerons control roll.");
+});
+
+test("lesson quizzes can be retaken without a limit", async () => {
+  await createCourse();
+  const quiz = await createLessonQuiz(fake.db.course_lessons[0].id);
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const response = await submit(quiz.id, answersFor(quiz, 0));
+    assert.equal(response.status, 201);
+    assert.equal((await response.json()).attempt.attempt_number, attempt);
+  }
+});
+
+test("staff loading a quiz get the answer key and explanations to edit", async () => {
+  await createCourse();
+  const lessonId = fake.db.course_lessons[0].id;
+  await createLessonQuiz(lessonId);
+  const loaded = (await (await loadLessonQuiz(lessonId, { token: STAFF_TOKEN })).json()).assessment;
+  assert.equal(loaded.questions[0].explanation, "The ailerons control roll.");
+  assert.equal(loaded.questions[0].choices[0].isCorrect, true);
+});
+
+test("members cannot load or answer quizzes in a draft course", async () => {
+  const draft = await createCourse({ status: "draft" });
+  const lessonId = fake.db.course_lessons[0].id;
+  const quiz = await createLessonQuiz(lessonId);
+  const exam = await createFinalExam(draft.id);
+
+  await assertJsonError(await loadLessonQuiz(lessonId), 404);
+  await assertJsonError(await fetch(`${api}/api/courses/${draft.id}/final-exam`, {
+    headers: signedIn(MEMBER_TOKEN),
+  }), 404);
+  await assertJsonError(await submit(quiz.id, answersFor(quiz)), 404);
+  await assertJsonError(await submit(exam.id, answersFor(exam)), 404);
+  assert.equal(fake.db.assessment_attempts.length, 0);
+  assert.equal((await loadLessonQuiz(lessonId, { token: STAFF_TOKEN })).status, 200);
+});
+
+const questionCountCases = [
+  ["a lesson quiz with 9 questions", "lesson", 9],
+  ["a lesson quiz with 26 questions", "lesson", 26],
+  ["a final exam with 49 questions", "final", 49],
+  ["a final exam with 51 questions", "final", 51],
+];
+
+for (const [name, type, count] of questionCountCases) {
+  test(`${name} is refused`, async () => {
+    const created = await createCourse();
+    const path = type === "lesson"
+      ? `/api/lessons/${fake.db.course_lessons[0].id}/assessment`
+      : `/api/courses/${created.id}/final-exam`;
+    const title = type === "lesson" ? "Knowledge check" : "Final exam";
+    assert.match(await assertJsonError(await sendJson("POST", path, assessment(title, undefined, count)), 400), /questions/);
+    assert.equal(fake.db.quizzes.length, 0);
+  });
+}
+
+test("a final exam passes at 80% unless the instructor sets another mark", async () => {
+  const created = await createCourse();
+  const exam = await createFinalExam(created.id);
+  assert.equal(exam.passMark, 80);
+  assert.equal(fake.db.final_exams[0].pass_mark, 80);
+
+  const failing = await (await submit(exam.id, answersFor(exam, 39))).json();
+  assert.equal(failing.attempt.score, 78);
+  assert.equal(failing.passed, false);
+  const passing = await (await submit(exam.id, answersFor(exam, 40))).json();
+  assert.equal(passing.passed, true);
+});
+
+test("questions cannot be added past the limit or removed below it", async () => {
+  await createCourse();
+  const full = await createLessonQuiz(fake.db.course_lessons[0].id, assessment("Knowledge check", undefined, 25));
+  const extra = assessment().questions[0];
+  assert.match(await assertJsonError(await sendJson("POST", `/api/quizzes/${full.id}/questions`, extra), 400), /10 to 25/);
+
+  const smallest = await createLessonQuiz(fake.db.course_lessons[1].id);
+  assert.match(
+    await assertJsonError(await sendJson("DELETE", `/api/questions/${smallest.questions[0].id}`), 400),
+    /10 to 25/,
+  );
+  assert.equal(fake.db.questions.filter((row) => row.quiz_id === smallest.id).length, 10);
+  assert.equal((await sendJson("POST", `/api/quizzes/${smallest.id}/questions`, extra)).status, 201);
+  assert.equal((await sendJson("DELETE", `/api/questions/${smallest.questions[0].id}`)).status, 204);
+});
+
+test("editing a quiz keeps the ids of questions and choices sent back", async () => {
+  await createCourse();
+  const quiz = await createLessonQuiz(fake.db.course_lessons[0].id);
+  const edited = {
+    title: "Renamed check",
+    questions: [
+      ...quiz.questions.slice(1).map((question) => ({
+        ...question,
+        questionText: `${question.questionText} (edited)`,
+      })),
+      { ...assessment().questions[0], questionText: "A brand new question" },
+    ],
+  };
+
+  const response = await sendJson("PUT", `/api/quizzes/${quiz.id}`, edited);
+  const saved = (await response.json()).assessment;
+  assert.equal(response.status, 200);
+  assert.deepEqual(saved.questions.slice(0, 9).map((question) => question.id), quiz.questions.slice(1).map((question) => question.id));
+  assert.deepEqual(saved.questions[0].choices.map((choice) => choice.id), quiz.questions[1].choices.map((choice) => choice.id));
+  assert.match(saved.questions[0].questionText, /\(edited\)$/);
+  assert.equal(saved.questions[9].questionText, "A brand new question");
+  assert.equal(fake.db.questions.some((row) => row.id === quiz.questions[0].id), false);
+});
+
+test("saving a course keeps its lesson quizzes and their attempts", async () => {
+  const created = await createCourse();
+  const welcome = created.lessonContent[0];
+  const quiz = await createLessonQuiz(welcome.id);
+  assert.equal((await submit(quiz.id, answersFor(quiz))).status, 201);
+
+  const response = await sendCourse("PUT", `/api/courses/${created.id}`, course({ title: "Flight Basics 2" }));
+  assert.equal(response.status, 200);
+  const saved = (await response.json()).course;
+  assert.notEqual(saved.lessonContent[0].id, welcome.id);
+  const reloaded = (await (await loadLessonQuiz(saved.lessonContent[0].id)).json()).assessment;
+  assert.equal(reloaded.id, quiz.id);
+  assert.equal(fake.db.assessment_attempts.length, 1);
+  assert.equal((await loadLessonQuiz(saved.lessonContent[1].id)).status, 404);
+});
+
+test("a renamed lesson keeps its quiz when the course sends the quiz id back", async () => {
+  const created = await createCourse();
+  const quiz = await createLessonQuiz(created.lessonContent[1].id);
+  const lessons = course().lessonContent.map((lesson, index) =>
+    index === 1 ? { ...lesson, title: "First flight", quizId: quiz.id } : lesson);
+
+  const response = await sendCourse("PUT", `/api/courses/${created.id}`, course({ lessonContent: lessons }));
+  const saved = (await response.json()).course;
+  assert.equal(saved.lessonContent[1].title, "First flight");
+  assert.equal((await (await loadLessonQuiz(saved.lessonContent[1].id)).json()).assessment.id, quiz.id);
+});
+
+test("a course edit that fails puts its lesson quizzes back too", async () => {
+  const created = await createCourse();
+  const quiz = await createLessonQuiz(created.lessonContent[0].id);
+  fake.failNext("lesson_resources");
+
+  const response = await sendCourse("PUT", `/api/courses/${created.id}`, course({ title: "Half Saved" }));
+  assert.match(await assertJsonError(response, 500), /previous version/i);
+  const restored = await readCourse(created.id);
+  assert.equal((await (await loadLessonQuiz(restored.lessonContent[0].id)).json()).assessment.id, quiz.id);
 });
 
 test("final exams enforce three attempts and issue one certificate when passed", async () => {
   const created = await createCourse();
-  const createResponse = await sendJson("POST", `/api/courses/${created.id}/final-exam`, assessment("Final exam", 50));
-  assert.equal(createResponse.status, 201);
-  const exam = (await createResponse.json()).exam;
-  const questionId = exam.questions[0].id;
-  const wrongChoice = exam.questions[0].choices[1].id;
-  const rightChoice = exam.questions[0].choices[0].id;
+  const exam = await createFinalExam(created.id, 50);
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const response = await sendJson("POST", `/api/quizzes/${exam.id}/attempts`, {
-      answers: { [questionId]: wrongChoice },
-    }, { token: MEMBER_TOKEN });
+    const response = await submit(exam.id, answersFor(exam, 0));
     assert.equal(response.status, 201);
     assert.equal((await response.json()).attemptsRemaining, 3 - attempt);
   }
-  const passingResponse = await sendJson("POST", `/api/quizzes/${exam.id}/attempts`, {
-    answers: { [questionId]: rightChoice },
-  }, { token: MEMBER_TOKEN });
+  const passingResponse = await submit(exam.id, answersFor(exam));
   const passingResult = await passingResponse.json();
   assert.equal(passingResponse.status, 201);
   assert.equal(passingResult.passed, true);
   assert.equal(typeof passingResult.certificate.certificate_identifier, "string");
 
-  const duplicateResponse = await sendJson("POST", `/api/quizzes/${exam.id}/attempts`, {
-    answers: { [questionId]: rightChoice },
-  }, { token: MEMBER_TOKEN });
-  assert.match(await assertJsonError(duplicateResponse, 409), /limit|passed/i);
+  assert.match(await assertJsonError(await submit(exam.id, answersFor(exam)), 409), /limit|passed/i);
   assert.equal(fake.db.certificates.length, 1);
   assert.equal(fake.db.course_completions.length, 1);
 });
 
 test("a final exam refuses a fourth failed attempt", async () => {
   const created = await createCourse();
-  const exam = (await (await sendJson(
-    "POST",
-    `/api/courses/${created.id}/final-exam`,
-    assessment("Final exam", 100),
-  )).json()).exam;
-  const wrongChoice = exam.questions[0].choices[1].id;
+  const exam = await createFinalExam(created.id, 100);
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const response = await sendJson("POST", `/api/quizzes/${exam.id}/attempts`, {
-      answers: { [exam.questions[0].id]: wrongChoice },
-    }, { token: MEMBER_TOKEN });
-    assert.equal(response.status, 201);
+    assert.equal((await submit(exam.id, answersFor(exam, 0))).status, 201);
   }
-  await assertJsonError(
-    await sendJson("POST", `/api/quizzes/${exam.id}/attempts`, {
-      answers: { [exam.questions[0].id]: wrongChoice },
-    }, { token: MEMBER_TOKEN }),
-    409,
-  );
+  await assertJsonError(await submit(exam.id, answersFor(exam, 0)), 409);
+});
+
+test("a passing submission that cannot issue the certificate does not use up an attempt", async () => {
+  const created = await createCourse();
+  const exam = await createFinalExam(created.id);
+  fake.failNext("certificates");
+
+  await assertJsonError(await submit(exam.id, answersFor(exam)), 500);
+  assert.equal(fake.db.assessment_attempts.length, 0);
+  assert.equal(fake.db.certificates.length, 0);
+  assert.equal(fake.db.course_completions.length, 0);
+
+  const retry = await (await submit(exam.id, answersFor(exam))).json();
+  assert.equal(retry.attempt.attempt_number, 1);
+  assert.equal(retry.attemptsRemaining, 2);
+  assert.equal(typeof retry.certificate.certificate_identifier, "string");
 });
 
 test("without the secret key the member list explains the problem", async () => {
