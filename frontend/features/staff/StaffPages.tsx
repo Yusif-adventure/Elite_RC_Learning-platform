@@ -53,6 +53,11 @@ export type StaffCourse = {
   sections: string[];
   sampleLessons: string[];
   lessonContent?: {
+    // Database id for loading the lesson's quiz. It changes on every save.
+    id?: string;
+    // Send a lesson's quiz id back with it so the quiz stays attached
+    // when the lesson is renamed.
+    quizId?: string;
     title: string;
     section: string;
     slides: CourseResource[];
