@@ -5,94 +5,74 @@ Branch: `Dev-branch` (checked at `e5b0e8d Add assessment backend foundation`)
 
 ## Verdict
 
-Day 4 is **not started**. One earlier phase is missing and two Day 2 defects
-would break the learner experience. Fix the items under "Blockers" first, then
-follow the build plan below.
+Updated 2026-11-12. The Day 2 defects below are fixed on `Dev-branch`. Day 4
+is still **waiting on Day 3**: neither `origin` nor any fork has instructor
+quiz tools. `origin/Dev-branch` still ends at `e5b0e8d`, and there are no
+other branches or open pull requests. Day 4 starts once the Day 3 work is
+pushed.
 
 ## What the earlier days delivered
 
 | Day | Status | Evidence |
 | --- | --- | --- |
-| 1 – Design | Partly done | The rules are written in `README.md` ("Learner assessments and certification"). The agreed numbers are not enforced anywhere: 10–25 questions per lesson quiz, 50 questions per final exam, and an 80% pass mark. |
-| 2 – Database and backend | Done, with defects | `supabase/004_assessments.sql` and the assessment routes in `backend/server.js` (lines 746–1060) |
-| 3 – Instructor tools | **Not done** | There is no assessment code in `frontend/`. `CourseBuilderPage.tsx` has no quiz editor, so staff cannot create a quiz without calling the API directly. |
+| 1 – Design | Done | The rules are written in `README.md`, and the backend now enforces them (see "Assessment rules the backend enforces"). |
+| 2 – Database and backend | Done | `supabase/004_assessments.sql`, `supabase/005_assessment_fixes.sql` and the assessment routes in `backend/server.js` |
+| 3 – Instructor tools | **Not pushed** | There is no assessment code in `frontend/`. `CourseBuilderPage.tsx` has no quiz editor. |
 
-## Blockers (must be resolved before Day 4)
+## Fixed on 2026-11-12
 
-1. **Day 3 instructor UI is missing.** Learners can only take a quiz that an
-   instructor created, and Day 4 cannot be tested end to end without one.
-   Day 3 must ship first, or the team must agree to seed quizzes through the
-   API for testing only.
+- **Saving a course detached its lesson quizzes.** `replaceChildren` now
+  reads each quiz's lesson before the save and attaches it again afterwards,
+  including when a failed save is rolled back. A lesson that sends `quizId`
+  back keeps its quiz after being renamed.
+- **The answer key was readable straight from Supabase.** By default
+  Supabase grants `anon` and `authenticated` access to every public table, so
+  the 004 policy on `answer_choices` exposed `is_correct`. 005 removes that
+  policy and the grants. It also hides `questions.explanation` from clients,
+  stops members inserting their own attempts, and hides final-exam quizzes in
+  draft courses.
+- **The learner GET returned explanations.** Explanations now arrive only in
+  the attempt review. Staff get the answer key and explanations.
+- **Learner routes ignored course status.** Members get 404 for assessments
+  in draft courses, and can't submit to them either.
+- **Editing a quiz gave every question a new id.** Questions and choices sent
+  back with their `id` are now updated in place.
+- **Day 1 numbers were not enforced.** Lesson quizzes now need 10–25
+  questions and final exams need exactly 50. The default pass mark is 80%.
+  Adding or deleting a single question respects the same limits.
+- **A failed certificate step still used up an attempt.** The attempt and
+  completion are now removed and the member gets a 500 response.
+- Lessons in course responses now carry `id`. The frontend type also has an
+  optional `quizId`, which Day 3 should send back.
 
-2. **Saving a course deletes its lesson quizzes.** `PUT /api/courses/:id` calls
-   `replaceChildren`, which deletes and re-inserts every section and lesson.
-   `lesson_assessments.lesson_id` references `course_lessons(id) on delete
-   cascade`, so every lesson quiz is detached the next time a course is saved.
-   The attempts survive, but they point at a quiz that no longer belongs to any
-   lesson. Options, in order of preference:
-   - Update lessons in place by id instead of deleting and re-inserting them.
-     This is the right fix, and it also lets lesson progress move off the
-     `[section, title]` key in `frontend/progress.ts`.
-   - Or, at minimum, read the `lesson_assessments` rows before the replace and
-     re-attach them by `(section title, lesson title)` afterwards. This is the
-     same matching rule that `lessonKey()` already uses for progress.
+## Still open for Day 4
 
-3. **The learner GET leaks explanations before submission.** `publicQuiz()`
-   always includes `explanation`, and `GET /api/lessons/:lessonId/assessment`
-   returns it to learners. Explanations usually give the answer away. The
-   learner view must remove `explanation`, while `includeAnswers` and the
-   staff editor keep it. The `questions` RLS policy also lets any client read
-   `explanation` straight from Supabase. Either revoke column access
-   (`revoke select (explanation) on public.questions from anon, authenticated`)
-   or move explanations into a table that only the service role can read.
-
-## Smaller Day 2 gaps that Day 4 touches
-
-These do not block the build, but the Day 4 work should fix them because it
-uses the same code:
-
-- **No way to read past attempts.** Day 4 requires results to show up on any
-  browser or device. Add `GET /api/quizzes/:quizId/attempts`, which returns the
-  member's attempts, newest first: `id, attempt_number, score, passed,
-  submitted_at`. Add an optional `?review=latest` that rebuilds the review for
-  the newest attempt on the server, using the same shape as the POST response.
-  The answer key must stay on the backend.
-- **Editing a quiz breaks the review of old attempts.** `saveQuizQuestions`
-  deletes every question and creates new ids, so the `answers` JSON in older
-  attempts points at ids that no longer exist. For Day 4, reviews should skip
-  questions they cannot match and show the stored score. The long-term fix is
-  to update questions in place (this belongs with the Day 3 editor).
-- **Learner GET does not check that the course is published.** It reads with
-  `supabaseAdmin`, which bypasses RLS. Check that the lesson's course is
-  `published` (staff may skip this check).
-- **Day 1 numbers are not enforced.** `validateQuiz` should take the
-  assessment type: lesson quizzes need 10–25 questions, final exams need exactly
-  50, and the final-exam pass mark should default to 80 instead of 70. This is
-  Day 3/Day 5 territory, but the learner UI should not hard-code question
-  counts.
-- **A failed save could still count as an attempt.** The attempt row is
-  inserted before the certificate work. If the certificate step fails, the
-  member gets a 500 response but the attempt is already counted. This matters
-  for final exams on Day 5 and is tested on Day 6.
+- **No way to read past attempts.** Results must show up on any browser or
+  device. Add `GET /api/quizzes/:quizId/attempts`, which returns the member's
+  attempts, newest first: `id, attempt_number, score, passed, submitted_at`.
+  Add `?review=latest`, which rebuilds the review for the newest attempt on the
+  server. Reviews must skip any question that was deleted since the attempt,
+  and show the stored score. Members can also read their own rows directly
+  through RLS, but the review needs the answer key, so it has to come from the
+  backend.
+- **Run `005_assessment_fixes.sql` on Supabase.** It has not been applied to
+  any environment yet.
 
 ## Day 4 build plan (once the blockers are cleared)
 
 ### Backend
 
-1. Remove `explanation` from the learner `GET` response and add the published
-   course check.
+1. (Done on 2026-11-12: explanations hidden, published check added.)
 2. Add `GET /api/quizzes/:quizId/attempts` with `?review=latest`. Add tests to
    `backend/test/server.test.js` that cover:
    - the learner GET has no `isCorrect` or `explanation` fields
    - a member only sees their own attempts
    - the review is only returned for an attempt the member has submitted
-3. Add a lesson quiz lookup so the lesson page can tell whether a quiz exists.
-   The page knows lessons by index and `lessonKey`, not by database id, so
-   either:
-   - `toCourse()` returns `lesson.id` and `lesson.quizId` (preferred, because it
-     saves a request per lesson), or
-   - the frontend calls `GET /api/lessons/:lessonId/assessment` and treats 404
-     as "no quiz".
+3. Lesson lookup: `toCourse()` now returns `lesson.id`. The lesson page calls
+   `GET /api/lessons/:lessonId/assessment` for the current lesson and treats
+   404 as "no quiz". `quizId` was left out of course responses on purpose,
+   because reading it would make every course read depend on 004 having been
+   run.
 
 ### Frontend
 
@@ -146,9 +126,8 @@ New feature folder `frontend/features/quiz/`:
 
 ### Commits (planned)
 
-1. `Keep lesson quizzes when a course is saved` (blocker 2)
-2. `Hide explanations until a quiz is submitted` (blocker 3 and the published
-   check)
+1. Done: `Keep answer keys and scores out of reach of the browser`
+2. Done: `Enforce the agreed assessment rules and keep quizzes when courses change`
 3. `Add learner quiz attempt history endpoint`
 4. `Show lesson quizzes on the lesson page`
 5. `Show quiz results and retakes across devices`
@@ -169,5 +148,5 @@ Day 5 can reuse the following:
   - define "completed required content" (all lessons marked done? all lesson
     quizzes attempted?)
   - make the attempt insert and the certificate issue a single transaction
-    (for example a Postgres function called through `rpc`)
-  - enforce 50 questions and the 80% default pass mark
+    (for example a Postgres function called through `rpc`). Today a failure is
+    undone by deleting the attempt, which is good enough but not atomic.
