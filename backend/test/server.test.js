@@ -880,3 +880,221 @@ test("when progress tracking was never set up, staff are told which setup file t
 
   assert.match(await assertJsonError(response, 503), /supabase\/003_lesson_progress\.sql/);
 });
+
+// Quizzes and the final exam travel with the course, so the course builder
+// saves everything with one Save or Publish.
+function courseWithAssessments(overrides = {}) {
+  const base = course();
+  return course({
+    lessonContent: [{ ...base.lessonContent[0], quiz: assessment() }, base.lessonContent[1]],
+    finalExam: assessment("Final exam", 60),
+    ...overrides,
+  });
+}
+
+test("saving a course stores its lesson quiz and final exam for staff to edit", async () => {
+  const created = await createCourse(courseWithAssessments());
+
+  const quiz = created.lessonContent[0].quiz;
+  assert.equal(quiz.title, "Knowledge check");
+  assert.equal(quiz.questions[0].questionText, "Which control keeps the aircraft level?");
+  assert.equal(quiz.questions[0].explanation, "The ailerons control roll.");
+  assert.deepEqual(
+    quiz.questions[0].choices.map((choice) => [choice.text, choice.isCorrect]),
+    [["Ailerons", true], ["Landing gear", false]],
+  );
+  assert.equal(created.lessonContent[1].quiz, undefined);
+  assert.equal(created.finalExam.title, "Final exam");
+  assert.equal(created.finalExam.passMark, 60);
+  assert.equal(created.finalExam.questions.length, 1);
+
+  // The quiz hangs off the lesson learners open, in the right section.
+  assert.equal(fake.db.lesson_assessments.length, 1);
+  const lesson = fake.db.course_lessons.find((row) => row.id === fake.db.lesson_assessments[0].lesson_id);
+  assert.equal(fake.db.course_sections.find((row) => row.id === lesson.section_id).title, "Setup");
+  const learnerResponse = await fetch(`${api}/api/lessons/${lesson.id}/assessment`, {
+    headers: signedIn(MEMBER_TOKEN),
+  });
+  assert.equal(learnerResponse.status, 200);
+  assert.equal((await learnerResponse.json()).assessment.id, quiz.id);
+});
+
+test("saving a course again keeps its quizzes and learners' attempts, even after a lesson is renamed", async () => {
+  const created = await createCourse(courseWithAssessments());
+  const quiz = created.lessonContent[0].quiz;
+  const question = quiz.questions[0];
+  // A learner takes the quiz before the instructor edits it.
+  const attempt = await sendJson("POST", `/api/quizzes/${quiz.id}/attempts`, {
+    answers: { [question.id]: question.choices[0].id },
+  }, { token: MEMBER_TOKEN });
+  assert.equal(attempt.status, 201);
+
+  const editedQuiz = {
+    ...quiz,
+    questions: [
+      {
+        ...question,
+        questionText: "Which control rolls the aircraft?",
+        choices: [...question.choices, { text: "Rudder", isCorrect: false }],
+      },
+      {
+        questionText: "What powers a brushless motor?",
+        choices: [{ text: "An ESC", isCorrect: true }, { text: "A servo", isCorrect: false }],
+      },
+    ],
+  };
+  const response = await sendCourse("PUT", `/api/courses/${created.id}`, {
+    ...created,
+    lessonContent: [
+      { ...created.lessonContent[0], title: "Welcome aboard", quiz: editedQuiz },
+      created.lessonContent[1],
+    ],
+    finalExam: { ...created.finalExam, passMark: 80 },
+  });
+  assert.equal(response.status, 200);
+  const saved = (await response.json()).course;
+
+  const savedQuiz = saved.lessonContent[0].quiz;
+  assert.equal(saved.lessonContent[0].title, "Welcome aboard");
+  assert.equal(savedQuiz.id, quiz.id);
+  assert.equal(savedQuiz.questions[0].id, question.id);
+  assert.equal(savedQuiz.questions[0].questionText, "Which control rolls the aircraft?");
+  assert.deepEqual(
+    savedQuiz.questions[0].choices.slice(0, 2).map((choice) => choice.id),
+    question.choices.map((choice) => choice.id),
+  );
+  assert.equal(savedQuiz.questions[0].choices[2].text, "Rudder");
+  assert.equal(savedQuiz.questions[1].questionText, "What powers a brushless motor?");
+  assert.equal(saved.finalExam.id, created.finalExam.id);
+  assert.equal(saved.finalExam.passMark, 80);
+  assert.equal(fake.db.quizzes.length, 2);
+  assert.equal(fake.db.assessment_attempts.length, 1);
+});
+
+test("removing a lesson quiz or the final exam deletes it", async () => {
+  const created = await createCourse(courseWithAssessments());
+
+  const response = await sendCourse("PUT", `/api/courses/${created.id}`, {
+    ...created,
+    lessonContent: [{ ...created.lessonContent[0], quiz: null }, created.lessonContent[1]],
+    finalExam: null,
+  });
+
+  assert.equal(response.status, 200);
+  const saved = (await response.json()).course;
+  assert.equal(saved.lessonContent[0].quiz, undefined);
+  assert.equal(saved.finalExam, undefined);
+  assert.equal(fake.db.quizzes.length, 0);
+  assert.equal(fake.db.final_exams.length, 0);
+  assert.equal(fake.db.lesson_assessments.length, 0);
+});
+
+test("a course saved without any quiz details, as older pages send it, keeps its quizzes", async () => {
+  const created = await createCourse(courseWithAssessments());
+
+  const response = await sendCourse("PUT", `/api/courses/${created.id}`, course({ title: "Flight Basics 2" }));
+
+  assert.equal(response.status, 200);
+  const saved = (await response.json()).course;
+  assert.equal(saved.lessonContent[0].quiz.id, created.lessonContent[0].quiz.id);
+  assert.equal(saved.finalExam.id, created.finalExam.id);
+  assert.equal(fake.db.quizzes.length, 2);
+});
+
+test("an incomplete lesson quiz is refused with a message naming the lesson, and nothing is saved", async () => {
+  const quiz = assessment();
+  quiz.questions[0].choices[0].isCorrect = false;
+
+  const response = await sendCourse("POST", "/api/courses", courseWithAssessments({
+    lessonContent: [{ ...course().lessonContent[0], quiz }],
+  }));
+
+  const error = await assertJsonError(response, 400);
+  assert.match(error, /Welcome/);
+  assert.match(error, /question 1/i);
+  assert.match(error, /correct answer/i);
+  assert.equal(fake.db.courses.length, 0);
+  assert.equal(fake.db.quizzes.length, 0);
+});
+
+test("a final exam pass mark must be a whole percentage from 1 to 100", async () => {
+  const created = await createCourse(courseWithAssessments());
+
+  for (const passMark of [0, 101, 72.5, "seventy", null]) {
+    const response = await sendCourse("PUT", `/api/courses/${created.id}`, {
+      ...created,
+      finalExam: { ...created.finalExam, passMark },
+    });
+    assert.match(await assertJsonError(response, 400), /pass mark/i, `pass mark ${passMark}`);
+  }
+  assert.equal(fake.db.final_exams[0].pass_mark, 60);
+});
+
+test("the separate final exam routes refuse a pass mark of 0", async () => {
+  const created = await createCourse();
+
+  const response = await sendJson("POST", `/api/courses/${created.id}/final-exam`, assessment("Final exam", 0));
+
+  assert.match(await assertJsonError(response, 400), /pass mark/i);
+  assert.equal(fake.db.final_exams.length, 0);
+});
+
+test("an edit that fails while saving a quiz puts the previous quiz back", async () => {
+  const created = await createCourse(courseWithAssessments());
+  const quiz = created.lessonContent[0].quiz;
+  fake.failNext("answer_choices");
+
+  const response = await sendCourse("PUT", `/api/courses/${created.id}`, {
+    ...created,
+    lessonContent: [
+      {
+        ...created.lessonContent[0],
+        quiz: { ...quiz, questions: [{ ...quiz.questions[0], questionText: "Half saved?" }] },
+      },
+      created.lessonContent[1],
+    ],
+    finalExam: { ...created.finalExam, passMark: 90 },
+  });
+
+  assert.match(await assertJsonError(response, 500), /previous version was kept/i);
+  const staffResponse = await staffGet("/api/staff/courses");
+  const [restored] = (await staffResponse.json()).courses;
+  assert.deepEqual(restored.lessonContent[0].quiz, quiz);
+  assert.deepEqual(restored.finalExam, created.finalExam);
+});
+
+test("before the assessment tables are set up, staff can still list and save courses, and adding a quiz says what to run", async () => {
+  const created = await createCourse();
+  for (const table of ["quizzes", "questions", "answer_choices", "lesson_assessments", "final_exams"]) {
+    fake.dropTable(table);
+  }
+
+  assert.equal((await staffGet("/api/staff/courses")).status, 200);
+  const withoutQuizzes = {
+    ...created,
+    desc: "Updated",
+    lessonContent: created.lessonContent.map((lesson) => ({ ...lesson, quiz: null })),
+    finalExam: null,
+  };
+  assert.equal((await sendCourse("PUT", `/api/courses/${created.id}`, withoutQuizzes)).status, 200);
+
+  const withQuiz = await sendCourse("PUT", `/api/courses/${created.id}`, courseWithAssessments());
+  assert.match(await assertJsonError(withQuiz, 503), /004_assessments\.sql/);
+  const newWithQuiz = await sendCourse("POST", "/api/courses", courseWithAssessments({ title: "Another" }));
+  assert.match(await assertJsonError(newWithQuiz, 503), /004_assessments\.sql/);
+  assert.equal((await readCourse(created.id)).desc, "Updated");
+  assert.equal(fake.db.courses.length, 1);
+});
+
+test("the public course reads never include quizzes or answer keys", async () => {
+  const created = await createCourse(courseWithAssessments());
+
+  const listed = (await (await fetch(`${api}/api/courses`)).json()).courses[0];
+  const single = await readCourse(created.id);
+
+  for (const publicCourse of [listed, single]) {
+    assert.equal(publicCourse.finalExam, undefined);
+    assert.equal(JSON.stringify(publicCourse).includes("isCorrect"), false);
+    assert.equal(JSON.stringify(publicCourse).includes("Ailerons"), false);
+  }
+});

@@ -20,6 +20,7 @@ import {
 } from "./features/staff/courseApi";
 import { ConfirmDialog, errorText, useToast } from "./features/staff/Feedback";
 import { useStaffData } from "./features/staff/useStaffData";
+import { withoutAssessments } from "./features/staff/quizDrafts";
 import type { Member, Role } from "./staffStats";
 import { supabase } from "./supabaseClient";
 import {
@@ -2411,7 +2412,9 @@ export default function App() {
   });
 
   // Learners only see published courses, so a draft leaves the public list.
-  const syncPublicCourse = (saved: Course) => {
+  const syncPublicCourse = (savedCourse: Course) => {
+    // Learner pages never hold quiz answer keys, even in a staff browser.
+    const saved = withoutAssessments(savedCourse);
     const others = courses.filter((item) => item.id !== saved.id);
     courses =
       saved.status === "published"

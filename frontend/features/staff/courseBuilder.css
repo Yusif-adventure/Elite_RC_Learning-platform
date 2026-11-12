@@ -583,3 +583,189 @@
     min-width: 0;
   }
 }
+
+/* Lesson quizzes and the final exam. */
+.course-form textarea.invalid {
+  border-color: var(--red);
+  background: #fffafa;
+}
+
+.course-form textarea.invalid:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(216, 77, 89, 0.15);
+}
+
+.lesson-quiz {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--blue);
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.quiz-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.quiz-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.quiz-question {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.quiz-question.has-problem {
+  border-color: var(--red);
+}
+
+.quiz-question-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.quiz-choices {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.quiz-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.course-form .quiz-choice input[type="radio"] {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+
+.course-form .quiz-choice input[type="radio"].invalid {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+
+.quiz-choice-letter {
+  flex: none;
+  width: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.quiz-choice.correct input:not([type="radio"]) {
+  border-color: var(--green);
+  background: #f3fbf7;
+}
+
+/* After the correct-answer style, so an empty correct answer still shows red. */
+.course-form .quiz-choice input.invalid {
+  border-color: var(--red);
+  background: #fffafa;
+}
+
+.quiz-move {
+  display: inline-flex;
+  flex: none;
+}
+
+.quiz-move button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: none;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.quiz-move button:hover:not(:disabled) {
+  color: var(--blue);
+  background: var(--sky);
+}
+
+.quiz-move button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.quiz-problem {
+  margin: 0;
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.final-exam-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.final-exam-head .field {
+  width: 220px;
+}
+
+.final-exam-empty {
+  display: grid;
+  gap: 12px;
+}
+
+.final-exam-empty p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@media (max-width: 760px) {
+  .lesson-quiz,
+  .quiz-question {
+    padding: 12px;
+  }
+
+  .quiz-choice {
+    gap: 4px;
+  }
+
+  .quiz-choice-letter {
+    display: none;
+  }
+
+  .quiz-move button {
+    width: 26px;
+  }
+
+  .final-exam-head {
+    flex-direction: column;
+  }
+
+  .final-exam-head .field {
+    width: 100%;
+  }
+}

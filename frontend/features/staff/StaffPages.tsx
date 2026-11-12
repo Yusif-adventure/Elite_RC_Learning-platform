@@ -17,6 +17,7 @@ import {
 } from "../../staffStats";
 import { ConfirmDialog } from "./Feedback";
 import type { StaffDataStatus } from "./useStaffData";
+import type { SavedFinalExam, SavedQuiz } from "./quizDrafts";
 import "./staffDashboard.css";
 
 type StaffPage = "admin" | "builder" | "instructor" | "members" | "course";
@@ -58,7 +59,10 @@ export type StaffCourse = {
     slides: CourseResource[];
     video?: CourseResource;
     youtubeUrl?: string;
+    // Staff reads include the quiz with its answer key; null removes it on save.
+    quiz?: SavedQuiz | null;
   }[];
+  finalExam?: SavedFinalExam | null;
   // Only on the staff course list.
   createdBy?: string | null;
   createdAt?: string;

@@ -536,6 +536,26 @@ Staff-only endpoints need an `Authorization: Bearer <access token>` header
 from a signed-in Supabase session. The frontend sends it automatically. Without
 a sign-in they answer `401`; with a member's sign-in they answer `403`.
 
+#### Quizzes in the course builder
+
+The course builder saves lesson quizzes and the final exam together with the
+course, through `POST /api/courses` and `PUT /api/courses/:id`. Each entry in
+`lessonContent` may carry a `quiz`, and the course may carry a `finalExam` with
+a `passMark`. The staff reads (`GET /api/staff/courses` and the save responses)
+return them with their answer keys; the public course reads never do.
+
+- Saving a course recreates its lessons, so the backend links each quiz to its
+  lesson's new row again. A quiz, question, or answer choice sent with its `id`
+  is edited in place, which keeps learners' attempts and saved answers.
+- `quiz: null` or `finalExam: null` removes it, and deletes learners' attempts
+  at it. Leaving the field out keeps what is saved, so an older page cannot
+  remove quizzes by accident.
+- Every question needs text, at least two answer choices with text, and exactly
+  one correct answer. The pass mark is a whole percentage from 1 to 100, and is
+  70 when left out. These rules also apply to the separate final exam routes.
+- If `supabase/004_assessments.sql` has not been run, courses still load and
+  save, and saving one with a quiz explains which file to run.
+
 ### Thursday release runbooks
 
 - [Production checklist](./docs/release/2026-11-06-thursday-production-checklist.md)

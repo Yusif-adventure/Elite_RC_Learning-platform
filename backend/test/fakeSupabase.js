@@ -46,11 +46,13 @@ const TABLE_RULES = {
   lesson_assessments: {
     defaults: {},
     parent: ["lesson_id", "course_lessons"],
+    otherParents: [["quiz_id", "quizzes"]],
     unique: ["lesson_id"],
   },
   final_exams: {
     defaults: { pass_mark: 70 },
     parent: ["course_id", "courses"],
+    otherParents: [["quiz_id", "quizzes"]],
     unique: ["course_id"],
   },
   assessment_attempts: {
@@ -69,6 +71,9 @@ const TABLE_RULES = {
     unique: ["user_id", "course_id"],
   },
 };
+
+// Every foreign key on a table; deleting any parent row deletes the child row.
+const parentsOf = (rules) => [rules.parent, ...(rules.otherParents || [])].filter(Boolean);
 
 // Like Supabase Auth's admin API errors, e.g. for an id that matches no account.
 const authError = (status, errorCode, msg) => ({ status, body: { code: status, error_code: errorCode, msg } });
@@ -124,9 +129,29 @@ export async function startFakeSupabase({ serviceKey }) {
   };
   reset();
 
-  const nestedCourse = (course) => ({
+  const nestedQuiz = (quizId) => {
+    const quiz = db.quizzes.find((row) => row.id === quizId);
+    return {
+      ...quiz,
+      questions: db.questions
+        .filter((question) => question.quiz_id === quizId)
+        .map((question) => ({
+          ...question,
+          answer_choices: db.answer_choices.filter((choice) => choice.question_id === question.id),
+        })),
+    };
+  };
+
+  // Like PostgREST, a one-to-one embed (its key is also unique) is an object or null.
+  const embedOne = (row) => (row ? { ...row, quizzes: nestedQuiz(row.quiz_id) } : null);
+
+  // Quizzes are only embedded when the select asks for them, as the staff read does.
+  const nestedCourse = (course, select) => ({
     ...course,
     course_objectives: db.course_objectives.filter((row) => row.course_id === course.id),
+    ...(select.includes("final_exams")
+      ? { final_exams: embedOne(db.final_exams.find((row) => row.course_id === course.id)) }
+      : {}),
     course_sections: db.course_sections
       .filter((section) => section.course_id === course.id)
       .map((section) => ({
@@ -136,6 +161,9 @@ export async function startFakeSupabase({ serviceKey }) {
           .map((lesson) => ({
             ...lesson,
             lesson_resources: db.lesson_resources.filter((row) => row.lesson_id === lesson.id),
+            ...(select.includes("lesson_assessments")
+              ? { lesson_assessments: embedOne(db.lesson_assessments.find((row) => row.lesson_id === lesson.id)) }
+              : {}),
           })),
       })),
   });
@@ -143,18 +171,17 @@ export async function startFakeSupabase({ serviceKey }) {
   const removeRows = (table, shouldRemove) => {
     const removed = db[table].filter(shouldRemove);
     db[table] = db[table].filter((row) => !shouldRemove(row));
+    const removedIds = new Set(removed.map((row) => row.id));
     for (const [childTable, rules] of Object.entries(TABLE_RULES)) {
-      if (rules.parent?.[1] !== table) continue;
-      const [column] = rules.parent;
-      const removedIds = new Set(removed.map((row) => row.id));
-      removeRows(childTable, (row) => removedIds.has(row[column]));
+      for (const [column, parentTable] of parentsOf(rules)) {
+        if (parentTable === table) removeRows(childTable, (row) => removedIds.has(row[column]));
+      }
     }
   };
 
   const findViolation = (table, row, ignoreId) => {
     const rules = TABLE_RULES[table];
-    if (rules.parent) {
-      const [column, parentTable] = rules.parent;
+    for (const [column, parentTable] of parentsOf(rules)) {
       if (!db[parentTable].some((parent) => parent.id === row[column])) {
         return databaseError(409, "23503", `insert on "${table}" violates foreign key constraint`);
       }
@@ -185,10 +212,16 @@ export async function startFakeSupabase({ serviceKey }) {
     const matches = (row) => filters.every(([key, value]) => row[key] === value);
 
     if (method === "GET") {
+      const select = url.searchParams.get("select") || "*";
+      // What PostgREST answers when a select embeds a table whose setup SQL was never run.
+      const missingEmbed = [...missingTables].find((name) => select.includes(name));
+      if (missingEmbed) {
+        return databaseError(400, "PGRST200", `Could not find a relationship between '${table}' and '${missingEmbed}' in the schema cache`);
+      }
       const rows = db[table]
         .filter(matches)
         .slice(offset, offset + limit)
-        .map((row) => (table === "courses" ? nestedCourse(row) : row));
+        .map((row) => (table === "courses" ? nestedCourse(row, select) : row));
       if (!String(headers.accept).includes("vnd.pgrst.object")) return { status: 200, body: rows };
       return rows.length === 1
         ? { status: 200, body: rows[0] }
