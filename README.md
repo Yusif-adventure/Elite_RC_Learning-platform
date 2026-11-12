@@ -428,6 +428,9 @@ src/
 - [`supabase/004_assessments.sql`](./supabase/004_assessments.sql): quizzes,
   questions, answer choices, assessment attempts, final exams, course
   completion, certificates, indexes, and assessment row-level security.
+- [`supabase/005_protect_answer_keys.sql`](./supabase/005_protect_answer_keys.sql):
+  stops browsers reading quiz answer keys and explanations, and stops members
+  recording their own attempts, so only the backend scores quizzes.
 
 ## Running the project
 
@@ -573,10 +576,12 @@ return them with their answer keys; the public course reads never do.
    **My learning** says progress tracking is not switched on yet.
 6. Run [`supabase/004_assessments.sql`](./supabase/004_assessments.sql) to
    enable quizzes, final exams, attempts, completion, and certificates.
-7. Copy the project URL, anon key, and service role key into `backend/.env`,
+7. Run [`supabase/005_protect_answer_keys.sql`](./supabase/005_protect_answer_keys.sql).
+   Without it, anyone with the public anon key can read quiz answer keys.
+8. Copy the project URL, anon key, and service role key into `backend/.env`,
    and the URL and anon key into `frontend/.env`.
-8. Start the backend and verify `GET http://localhost:5000/api/status`.
-9. Make at least one staff account (see [Staff access](#staff-access)).
+9. Start the backend and verify `GET http://localhost:5000/api/status`.
+10. Make at least one staff account (see [Staff access](#staff-access)).
 
 The first migration creates normalized course, objective, section, lesson, and
 resource tables. It also seeds two courses and creates public-read storage
@@ -587,9 +592,9 @@ each member has completed. The browser reads and writes it directly with the
 member's own sign-in, and row-level security keeps every member to their own
 rows. Lessons are identified by section and title, because saving a course
 replaces its lessons, so renaming a lesson resets its progress. The fourth
-creates assessment content and attempt records; answer keys are available only
-to the backend service role, which calculates scores and enforces final-exam
-limits before returning feedback to learners.
+creates assessment content and attempt records. The fifth makes answer keys
+and explanations available only to the backend service role, which calculates
+scores and enforces final-exam limits before returning feedback to learners.
 
 ### Staff access
 
