@@ -22,6 +22,8 @@ import { ConfirmDialog, errorText, useToast } from "./features/staff/Feedback";
 import { useStaffData } from "./features/staff/useStaffData";
 import { withoutAssessments } from "./features/staff/quizDrafts";
 import { LessonQuiz } from "./features/quiz/LessonQuiz";
+import { FinalExamPanel } from "./features/quiz/FinalExamPanel";
+import { CertificateVerification } from "./features/quiz/CertificateVerification";
 import type { Member, Role } from "./staffStats";
 import { supabase } from "./supabaseClient";
 import {
@@ -1058,8 +1060,9 @@ function CourseDetails({
                 <b>{course.instructor}</b>
               </div>
             </div>
-            {progress && progress.done > 0 && (
+            {progress && (
               <div className="course-progress">
+                <ProgressCircle percent={progress.percent} label={`${course.title} course progress`} />
                 <div className="progress-bar">
                   <i style={{ width: `${progress.percent}%` }} />
                 </div>
@@ -1170,6 +1173,18 @@ function CourseDetails({
             {startButton}
           </aside>
         </section>
+        {course.id && <div style={{ marginTop: 24 }}>
+          <FinalExamPanel
+            courseId={course.id}
+            courseTitle={course.title}
+            instructor={course.instructor}
+            learnerName={user ? memberName(user) : "Learner"}
+            learnerId={user?.id}
+            complete={Boolean(progress?.finished)}
+            staff={isStaff(user)}
+          />
+        </div>}
+        {isStaff(user) && <div style={{ marginTop: 24 }}><CertificateVerification /></div>}
       </main>
     </>
   );
@@ -1395,9 +1410,34 @@ function Dashboard({
 
 type LessonTracking = {
   done: boolean;
+  hasQuiz: boolean;
   onComplete: () => Promise<void>;
   onUndo: () => Promise<void>;
 };
+
+function ProgressCircle({ percent, label }: { percent: number; label: string }) {
+  const clamped = Math.max(0, Math.min(100, percent));
+  const radius = 24;
+  const circumference = 2 * Math.PI * radius;
+  return (
+    <div className="progress-circle" role="img" aria-label={`${label}: ${clamped}% complete`}>
+      <svg viewBox="0 0 60 60" aria-hidden="true">
+        <circle className="progress-circle-track" cx="30" cy="30" r={radius} />
+        <circle
+          className="progress-circle-value"
+          cx="30"
+          cy="30"
+          r={radius}
+          style={{
+            strokeDasharray: circumference,
+            strokeDashoffset: circumference - (circumference * clamped) / 100,
+          }}
+        />
+      </svg>
+      <b>{clamped}%</b>
+    </div>
+  );
+}
 
 function Lesson({
   course,
@@ -1423,7 +1463,7 @@ function Lesson({
   if (lesson?.video) included.push(["video", "A short video preview"]);
   if (lesson?.youtubeUrl) included.push(["play", "The full lesson video on YouTube"]);
 
-  const completesLesson = Boolean(tracking && !tracking.done);
+  const completesLesson = Boolean(tracking && !tracking.done && !tracking.hasQuiz);
   // Saves the lesson as complete (when tracking) before moving on.
   const moveOn = async () => {
     if (completesLesson && tracking) {
@@ -1460,6 +1500,7 @@ function Lesson({
         <button className="crumb" onClick={() => go("course", course)}>
           ← {course.title}
         </button>
+        <ProgressCircle percent={tracking?.done ? 100 : 0} label={`${title} lesson progress`} />
         <span>
           Lesson {lessonIndex + 1} of {total}
         </span>
@@ -1573,7 +1614,9 @@ function Lesson({
           )}
         </article>
         {/* The quiz follows the lesson, once it has been started or completed. */}
-        {signedIn && lesson?.id && (started || tracking?.done) && <LessonQuiz lessonId={lesson.id} />}
+        {signedIn && lesson?.id && (started || tracking?.done) && (
+          <LessonQuiz lessonId={lesson.id} onMastery={tracking?.onComplete} />
+        )}
         <nav className="lesson-nav" aria-label="Lessons">
           {previousIndex === undefined ? (
             <Button variant="outline" onClick={() => go("course", course)}>
@@ -1595,6 +1638,8 @@ function Lesson({
             <Button onClick={() => void moveOn()} disabled={saving}>
               {saving
                 ? "Saving..."
+                : tracking?.hasQuiz && !tracking.done
+                  ? "Complete quiz to finish"
                 : nextIndex === undefined
                   ? completesLesson
                     ? "Complete course"
@@ -2334,6 +2379,7 @@ export default function App() {
       row.course_id === courseId && row.lesson_key === key;
     return {
       done: tracking.some(isSaved),
+      hasQuiz: Boolean(lesson.quiz),
       onComplete: async () => {
         await markLessonComplete(user.id, courseId, key);
         setProgress((current) =>

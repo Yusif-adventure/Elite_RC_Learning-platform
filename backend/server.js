@@ -1020,6 +1020,10 @@ app.get("/api/courses/:courseId/final-exam", requireUser, async (req, res) => {
       res.status(404).json({ error: "This course does not have a final exam." });
       return;
     }
+    if (!staff && !(await courseContentComplete(req.user.id, req.params.courseId))) {
+      res.status(403).json({ error: "Complete all course lessons before opening the final exam." });
+      return;
+    }
     const exam = await readSingleReference("final_exams", "course_id", req.params.courseId);
     res.json({ exam: { ...(await readQuiz(exam.quiz_id, staff)), passMark: Number(exam.pass_mark) } });
   } catch (error) {
@@ -1030,6 +1034,23 @@ app.get("/api/courses/:courseId/final-exam", requireUser, async (req, res) => {
     sendAssessmentError(res, error);
   }
 });
+
+// Final exams unlock only after every lesson in the course has been marked
+// complete. Staff can preview exams without learner progress.
+async function courseContentComplete(userId, courseId) {
+  const [{ data: sections, error: sectionsError }, { data: progress, error: progressError }] = await Promise.all([
+    supabaseAdmin.from("course_sections").select("title, course_lessons(title)").eq("course_id", courseId),
+    supabaseAdmin.from("lesson_progress").select("lesson_key").eq("user_id", userId).eq("course_id", courseId),
+  ]);
+  if (sectionsError) throw sectionsError;
+  if (progressError) throw progressError;
+  const lessons = (sections || []).flatMap((section) =>
+    (section.course_lessons || []).map((lesson) => JSON.stringify([section.title, lesson.title])),
+  );
+  if (!lessons.length) return false;
+  const completed = new Set((progress || []).map((row) => row.lesson_key));
+  return lessons.every((key) => completed.has(key));
+}
 
 app.post("/api/lessons/:lessonId/assessment", requireStaff, createLessonAssessment);
 app.post("/api/courses/:courseId/final-exam", requireStaff, createFinalExam);
@@ -1303,6 +1324,10 @@ app.post("/api/quizzes/:quizId/attempts", requireUser, async (req, res) => {
       res.status(404).json({ error: "Assessment or course content was not found." });
       return;
     }
+    if (assessment.type === "final" && !isStaff(req.user) && !(await courseContentComplete(req.user.id, assessment.courseId))) {
+      res.status(403).json({ error: "Complete all course lessons before submitting the final exam." });
+      return;
+    }
     const quiz = await readQuiz(req.params.quizId, true);
     const answers = req.body?.answers;
     if (!answers || typeof answers !== "object" || Array.isArray(answers)) {
@@ -1335,7 +1360,7 @@ app.post("/api/quizzes/:quizId/attempts", requireUser, async (req, res) => {
     const score = Math.round(
       (answerRows.filter(({ selected }) => selected.isCorrect).length / answerRows.length) * 10000,
     ) / 100;
-    const passed = assessment.type === "lesson" ? true : score >= assessment.passMark;
+    const passed = assessment.type === "lesson" ? score === 100 : score >= assessment.passMark;
     const attemptNumber = attempts.length + 1;
     const { data: attempt, error: insertError } = await supabaseAdmin
       .from("assessment_attempts")

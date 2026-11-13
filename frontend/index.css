@@ -48,6 +48,16 @@
   transform:rotate(-4deg);
 }
 
+.progress-circle{position:relative;display:grid;place-items:center;width:54px;height:54px;flex:0 0 54px}
+.progress-circle svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
+.progress-circle circle{fill:none;stroke-width:5}
+.progress-circle-track{stroke:rgba(117,200,255,.2)}
+.progress-circle-value{stroke:var(--blue);stroke-linecap:round;transition:stroke-dashoffset .3s ease}
+.progress-circle b{position:absolute;inset:0;z-index:1;display:grid;place-items:center;color:var(--navy);font-size:10px;line-height:1;text-align:center}
+.lesson-top .progress-circle{margin-left:auto}
+.lesson-top .progress-circle b{color:var(--navy)}
+.course-progress{display:flex;align-items:center;gap:12px}
+
 
 /* Footer link wrapping & transitions */
 footer>div{flex-wrap:wrap;gap:16px 24px}
@@ -103,4 +113,53 @@ footer>div button:hover{color:#fff;text-decoration:underline}
   .legal-section{padding:22px 18px}
   .legal-hero{padding:40px 18px 30px}
   .legal-body{padding:30px 18px 70px}
+}
+
+/* Completion certificate: navy sweep, gold award ribbon, and formal details. */
+.certificate-print{position:relative;isolation:isolate;display:block;width:min(100%,1100px);min-height:620px;aspect-ratio:1.414/1;margin:28px auto 8px;overflow:hidden;border:1px solid #c9a451;background:#fff;color:#102f52;box-shadow:0 18px 50px rgba(8,35,71,.15);font-family:Georgia,"Times New Roman",serif;text-align:left}
+.certificate-side{position:absolute;inset:0 0 auto;z-index:2;height:345px;padding:28px 38px;overflow:hidden;background:#0a294b;clip-path:polygon(0 0,100% 0,100% 58%,95% 59%,90% 62%,85% 66%,80% 70%,75% 74%,70% 78%,65% 82%,60% 86%,55% 90%,50% 94%,45% 97%,40% 99%,35% 100%,0 100%);text-align:left}
+.certificate-side:before,.certificate-side:after{position:absolute;content:"";width:780px;height:480px;left:auto;right:-155px;bottom:-220px;border:20px solid rgba(199,145,51,.9);border-left-color:transparent;border-bottom-color:transparent;border-radius:50%;transform:rotate(-13deg)}
+.certificate-side:after{right:-175px;bottom:-232px;width:760px;height:465px;border-width:15px;border-color:#fff;border-left-color:transparent;border-bottom-color:transparent}
+.certificate-brand{position:relative;z-index:3;display:flex;align-items:center}
+.certificate-logo{display:block;width:76px;height:76px;object-fit:cover;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,.28);print-color-adjust:exact;-webkit-print-color-adjust:exact}
+.certificate-heading{position:relative;z-index:3;margin:28px 0 0 5px;color:#e7c46f;text-align:left}
+.certificate-heading p{margin:0;font:italic 44px Georgia,"Times New Roman",serif;letter-spacing:1px}
+.certificate-heading h2{margin:2px 0 0;color:#fff;font:700 17px Arial,sans-serif;letter-spacing:7px}
+.certificate-medal-wrap{position:absolute;left:42px;top:260px;z-index:4;width:142px;height:210px}
+.certificate-medal-wrap>i{position:absolute;z-index:0;top:104px;width:37px;height:91px;background:#b77e25;clip-path:polygon(0 0,100% 0,100% 100%,50% 79%,0 100%);filter:drop-shadow(0 3px 2px rgba(20,30,45,.22))}
+.certificate-medal-wrap>i:first-child{left:21px;transform:rotate(9deg)}
+.certificate-medal-wrap>i:nth-child(2){right:21px;transform:rotate(-9deg)}
+.certificate-medal{position:relative;z-index:1;display:grid;align-content:center;justify-items:center;width:142px;height:142px;margin:0;border:4px solid #e4b94f;border-radius:50%;outline:8px double rgba(179,119,29,.8);background:repeating-conic-gradient(from -8deg,rgba(255,244,201,.34) 0 3deg,transparent 3deg 9deg),radial-gradient(circle,#ffe6a1 0%,#dda83f 68%,#b97922 100%);box-shadow:0 6px 18px rgba(20,30,45,.25),inset 0 0 0 8px rgba(255,246,207,.75);color:#173b5b;text-align:center;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+.certificate-medal span{display:block;color:#fff8db;font-size:31px;text-shadow:0 1px 1px rgba(81,49,8,.35)}
+.certificate-medal b{font:700 10px/1.4 Arial,sans-serif;letter-spacing:1.1px}
+.certificate-main{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;min-height:620px;padding:350px 42px 28px 22%;background:repeating-linear-gradient(178deg,transparent 0 20px,rgba(202,165,82,.045) 21px 22px),#fff;text-align:center}
+.certificate-main:before{position:absolute;inset:14px;z-index:-1;content:"";border:1px solid #e3d5b5;pointer-events:none}
+.certificate-topline{display:flex;justify-content:space-between;width:100%;color:#9b7635;font:700 9px Arial,sans-serif;letter-spacing:2px}
+.certificate-topline span:last-child{color:#66788b}
+.certificate-recipient{z-index:1;max-width:100%;margin:16px 0 0;color:#102f52;font:600 italic clamp(34px,4vw,48px) "URW Chancery L","Brush Script MT","Segoe Script",cursive;letter-spacing:.5px;overflow-wrap:anywhere}
+.certificate-rule{z-index:1;display:flex;align-items:center;justify-content:center;width:74%;height:16px;margin-top:0;border-bottom:1px solid #caa552}
+.certificate-rule i{width:7px;height:7px;transform:translateY(8px) rotate(45deg);background:#caa552}
+.certificate-intro{z-index:1;margin:16px 0 0;color:#607184;font:17px Georgia,"Times New Roman",serif}
+.certificate-course{z-index:1;max-width:100%;margin:10px 0 0;color:#143d68;font:700 27px Georgia,"Times New Roman",serif;overflow-wrap:anywhere}
+.certificate-copy{z-index:1;margin:13px 0 0;color:#607184;font:14px Arial,sans-serif;letter-spacing:.25px}
+.certificate-bottom{z-index:1;display:grid;grid-template-columns:1fr 1fr 1.25fr;align-items:end;gap:18px;width:100%;margin-top:auto;padding:28px 0 0;font-family:Arial,sans-serif}
+.certificate-bottom>div:not(.certificate-signature){display:grid;gap:8px;text-align:left}
+.certificate-bottom span{color:#6c7b8c;font-size:9px;font-weight:700;letter-spacing:1.5px}
+.certificate-bottom b{color:#173b61;font-size:12px}
+.certificate-id b{font-size:11px;overflow-wrap:anywhere}
+.certificate-signature{display:grid;gap:6px;justify-items:center}
+.certificate-signature i{width:100%;height:1px;background:#7c8998}
+.certificate-signature span{font:italic 16px Georgia,"Times New Roman",serif;color:#173b61}
+.certificate-signature small{font:9px Arial,sans-serif;color:#7b8795}
+.certificate-download{z-index:1;margin-top:15px!important}
+@page{size:A4 landscape;margin:0}
+@media print{
+ body *{visibility:hidden}.certificate-print,.certificate-print *{visibility:visible}
+ .certificate-print{position:fixed;inset:0;width:297mm;height:210mm;min-height:0;aspect-ratio:auto;margin:0!important;padding:0!important;overflow:hidden;border:0!important;box-shadow:none;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+ .certificate-side{height:76mm;padding:9mm 12mm;clip-path:polygon(0 0,100% 0,100% 58%,95% 59%,90% 62%,85% 66%,80% 70%,75% 74%,70% 78%,65% 82%,60% 86%,55% 90%,50% 94%,45% 97%,40% 99%,35% 100%,0 100%)}
+ .certificate-heading{margin-top:7mm}.certificate-heading p{font-size:34pt}.certificate-heading h2{font-size:12pt}
+ .certificate-medal-wrap{left:10mm;top:55mm;width:36mm;height:52mm}.certificate-medal-wrap>i{top:26mm;width:9mm;height:22mm}.certificate-medal-wrap>i:first-child{left:5mm}.certificate-medal-wrap>i:nth-child(2){right:5mm}
+ .certificate-medal{width:36mm;height:36mm}
+ .certificate-main{min-height:210mm;padding:86mm 10mm 8mm 23%;background:repeating-linear-gradient(178deg,transparent 0 6mm,rgba(202,165,82,.045) 6.2mm 6.5mm),#fff}
+ .certificate-recipient{font-size:30pt}.certificate-course{font-size:21pt}.certificate-bottom{padding-top:10mm}.certificate-download{display:none!important}
 }

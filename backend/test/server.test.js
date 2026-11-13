@@ -189,8 +189,8 @@ async function createLessonQuiz(lessonId, body = assessment()) {
   return (await response.json()).assessment;
 }
 
-async function createFinalExam(courseId, passMark) {
-  const response = await sendJson("POST", `/api/courses/${courseId}/final-exam`, assessment("Final exam", passMark));
+async function createFinalExam(courseId, passMark, count) {
+  const response = await sendJson("POST", `/api/courses/${courseId}/final-exam`, assessment("Final exam", passMark, count));
   assert.equal(response.status, 201);
   return (await response.json()).exam;
 }
@@ -838,7 +838,7 @@ test("lesson assessments hide answer keys and return answer feedback after submi
   const submitResponse = await submit(created.id, answersFor(loaded, 7));
   const result = await submitResponse.json();
   assert.equal(submitResponse.status, 201);
-  assert.equal(result.passed, true);
+  assert.equal(result.passed, false);
   assert.equal(result.attempt.score, 70);
   assert.equal(result.review[0].correct, true);
   assert.equal(result.review[9].correct, false);

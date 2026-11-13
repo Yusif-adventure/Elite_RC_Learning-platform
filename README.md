@@ -605,9 +605,10 @@ The sixth leaves completions and certificates to the backend too.
 
 ### Assessment rules the backend enforces
 
-- A lesson quiz has 10 to 25 questions and can be retaken without limit.
-- A final exam has exactly 50 questions, a pass mark that defaults to 80%,
-  and three attempts. Once a member passes, no further attempts are taken.
+- A lesson quiz has 10 to 25 questions, can be retaken without limit, and
+  counts toward lesson completion only when the learner scores 100%.
+- A final exam has exactly 50 questions, a pass mark that defaults to 80%, and
+  allows three attempts. Once a member passes, no further attempts are taken.
 - Every question has at least two choices and exactly one correct choice.
 - Members never receive `isCorrect` or `explanation` before submitting. The
   attempt response returns the review, including the correct choice and the

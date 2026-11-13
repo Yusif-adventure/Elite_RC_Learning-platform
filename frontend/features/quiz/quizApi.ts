@@ -1,6 +1,6 @@
 import { supabase } from "../../supabaseClient";
 import { API_URL } from "../staff/courseApi";
-import type { AttemptHistory, AttemptResult, LearnerQuiz } from "./quizState";
+import type { AttemptHistory, AttemptResult, LearnerFinalExam, LearnerQuiz } from "./quizState";
 
 // Quizzes are only reached through the backend, which keeps the answer key
 // until an attempt is submitted and works out every score.
@@ -33,6 +33,15 @@ export async function loadLessonQuiz(lessonId: string): Promise<LearnerQuiz | nu
   if (!response.ok) throw await readError(response);
   const payload: { assessment: LearnerQuiz } = await response.json();
   return payload.assessment;
+}
+
+// null when the course has no final exam. The API withholds the answer key.
+export async function loadFinalExam(courseId: string): Promise<LearnerFinalExam | null> {
+  const response = await request(`/api/courses/${encodeURIComponent(courseId)}/final-exam`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw await readError(response);
+  const payload: { exam: LearnerFinalExam } = await response.json();
+  return payload.exam;
 }
 
 // The member's attempts, newest first, with the review of the newest one.

@@ -56,7 +56,13 @@ function submittedOn(value: string) {
 // The quiz for one lesson: a summary of earlier results, the questions, and
 // the marked answers after submitting. Results are read from the server, so
 // they are the same on every browser and device.
-export function LessonQuiz({ lessonId }: { lessonId: string }) {
+export function LessonQuiz({
+  lessonId,
+  onMastery,
+}: {
+  lessonId: string;
+  onMastery?: () => Promise<void> | void;
+}) {
   const [loaded, setLoaded] = useState<Loaded>({ status: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
   const [view, setView] = useState<View>("summary");
@@ -86,7 +92,12 @@ export function LessonQuiz({ lessonId }: { lessonId: string }) {
         } catch (error) {
           historyError = error instanceof Error ? error.message : "Your earlier results could not be loaded.";
         }
-        if (current) setLoaded({ status: "ready", quiz, history, historyError });
+        if (current) {
+          setLoaded({ status: "ready", quiz, history, historyError });
+          if (history.attempts.some((attempt) => Number(attempt.score) === 100)) {
+            void onMastery?.();
+          }
+        }
       } catch (error) {
         if (current) {
           setLoaded({
@@ -156,6 +167,9 @@ export function LessonQuiz({ lessonId }: { lessonId: string }) {
     try {
       const result = await submitAttempt(quiz.id, answers);
       setLoaded({ ...loaded, history: withAttempt(history, result), historyError: "" });
+      if (result.passed && Number(result.attempt.score) === 100) {
+        await onMastery?.();
+      }
       setJustSubmitted(true);
       setView("result");
       scrollToPanel();
