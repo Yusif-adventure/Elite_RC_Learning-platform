@@ -21,6 +21,7 @@ import {
 import { ConfirmDialog, errorText, useToast } from "./features/staff/Feedback";
 import { useStaffData } from "./features/staff/useStaffData";
 import { withoutAssessments } from "./features/staff/quizDrafts";
+import { LessonQuiz } from "./features/quiz/LessonQuiz";
 import type { Member, Role } from "./staffStats";
 import { supabase } from "./supabaseClient";
 import {
@@ -1571,6 +1572,8 @@ function Lesson({
             </>
           )}
         </article>
+        {/* The quiz follows the lesson, once it has been started or completed. */}
+        {signedIn && lesson?.id && (started || tracking?.done) && <LessonQuiz lessonId={lesson.id} />}
         <nav className="lesson-nav" aria-label="Lessons">
           {previousIndex === undefined ? (
             <Button variant="outline" onClick={() => go("course", course)}>
