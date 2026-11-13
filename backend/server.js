@@ -203,7 +203,7 @@ function getErrorMessage(error) {
   return error instanceof Error ? error.message : "Unexpected database error.";
 }
 
-function toCourse(row) {
+function toCourse(row, includeExamAnswers = false) {
   const sections = [...(row.course_sections || [])].sort((a, b) => a.position - b.position);
   const lessonContent = sections.flatMap((section) =>
     [...(section.course_lessons || [])]
@@ -245,6 +245,11 @@ function toCourse(row) {
     sections: sections.map((section) => section.title),
     sampleLessons: lessonContent.slice(0, 3).map((lesson) => lesson.title),
     lessonContent,
+    finalExam: (row.final_exam || []).map(({ prompt, options, correctIndex }) => ({
+      prompt,
+      options,
+      ...(includeExamAnswers ? { correctIndex } : {}),
+    })),
   };
 }
 
@@ -259,6 +264,7 @@ function toCourseRow(input) {
     image_url: input.image || null,
     category: input.category || "General",
     status: input.status || "draft",
+    final_exam: input.finalExam || [],
   };
 }
 
@@ -308,6 +314,17 @@ function validateCourse(input) {
   const sections = input.sections.map((section) => String(section).trim());
   if (sections.some((section) => !section)) return "Every section needs a title.";
   if (new Set(sections).size !== sections.length) return "Each section in a course needs a different title.";
+  const exam = input.finalExam ?? [];
+  if (!Array.isArray(exam)) return "Final exam questions must be a list.";
+  if (input.status === "published" && exam.length === 0) return "Add at least one final exam question before publishing this course.";
+  for (const [index, question] of exam.entries()) {
+    if (!String(question?.prompt || "").trim() || !Array.isArray(question.options) || question.options.length < 2 || question.options.some((option) => !String(option).trim())) {
+      return `Final exam question ${index + 1} needs a prompt and at least two answer choices.`;
+    }
+    if (!Number.isInteger(question.correctIndex) || question.correctIndex < 0 || question.correctIndex >= question.options.length) {
+      return `Choose the correct answer for final exam question ${index + 1}.`;
+    }
+  }
   return validateLessons(input.lessonContent ?? [], sections);
 }
 
@@ -328,14 +345,14 @@ function sendCourseWriteError(res, error) {
   res.status(500).json({ error: error.message });
 }
 
-async function findCourse(id, client = supabase) {
+async function findCourse(id, client = supabase, includeExamAnswers = false) {
   const { data, error } = await client
     .from("courses")
     .select(courseSelect)
     .eq("id", id)
     .single();
   if (error) throw error;
-  return toCourse(data);
+  return toCourse(data, includeExamAnswers);
 }
 
 async function saveChildren(courseId, input) {
@@ -444,7 +461,7 @@ app.get("/api/courses", async (req, res) => {
     res.status(500).json({ error: error.message });
     return;
   }
-  res.json({ courses: (data || []).map(toCourse) });
+  res.json({ courses: (data || []).map((row) => toCourse(row)) });
 });
 
 app.get("/api/courses/:id", async (req, res) => {
@@ -475,7 +492,7 @@ app.post("/api/courses", requireStaff, async (req, res) => {
   }
   try {
     await saveChildren(data.id, input);
-    res.status(201).json({ course: await findCourse(data.id, supabaseAdmin) });
+    res.status(201).json({ course: await findCourse(data.id, supabaseAdmin, true) });
   } catch (childError) {
     await supabaseAdmin.from("courses").delete().eq("id", data.id);
     res.status(500).json({ error: getErrorMessage(childError) });
@@ -492,7 +509,7 @@ app.put("/api/courses/:id", requireStaff, async (req, res) => {
   const input = req.body;
   let previous;
   try {
-    previous = await findCourse(req.params.id, supabaseAdmin);
+    previous = await findCourse(req.params.id, supabaseAdmin, true);
   } catch (findError) {
     sendFindError(res, findError);
     return;
@@ -507,7 +524,7 @@ app.put("/api/courses/:id", requireStaff, async (req, res) => {
   }
   try {
     await replaceChildren(req.params.id, input);
-    res.json({ course: await findCourse(req.params.id, supabaseAdmin) });
+    res.json({ course: await findCourse(req.params.id, supabaseAdmin, true) });
   } catch (childError) {
     console.error(`Unable to update course ${req.params.id}.`, childError);
     const restored = await restoreCourse(req.params.id, previous);
@@ -570,7 +587,7 @@ app.get("/api/staff/courses", requireStaff, async (req, res) => {
   }
   res.json({
     courses: (data || []).map((row) => ({
-      ...toCourse(row),
+      ...toCourse(row, true),
       createdBy: row.created_by,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
