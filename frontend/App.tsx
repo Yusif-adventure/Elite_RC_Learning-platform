@@ -20,9 +20,20 @@ import {
 } from "./features/staff/courseApi";
 import { ConfirmDialog, errorText, useToast } from "./features/staff/Feedback";
 import { useStaffData } from "./features/staff/useStaffData";
+import { withoutAssessments } from "./features/staff/quizDrafts";
+import { LessonQuiz } from "./features/quiz/LessonQuiz";
+import { FinalExamPanel } from "./features/quiz/FinalExamPanel";
+import { CertificateVerification } from "./features/quiz/CertificateVerification";
 import type { Member, Role } from "./staffStats";
 import { supabase } from "./supabaseClient";
-import { parsePath, parseRoute, routePath, type Page, type Route } from "./routes";
+import {
+  parsePath,
+  parseRoute,
+  routePath,
+  waitsForCourses,
+  type Page,
+  type Route,
+} from "./routes";
 import { CATEGORIES, catalogCategories } from "./categories";
 import {
   courseProgress,
@@ -581,16 +592,23 @@ function CourseCard({ course, index = 0 }: { course: Course; index?: number }) {
 function Home({
   user,
   onSignOut,
+  loading = false,
 }: {
   user?: User | null;
   onSignOut?: () => void;
+  // True while the course library is still on its way. The page shows straight
+  // away so its animations start, and the course parts fill in when it arrives.
+  loading?: boolean;
 }) {
+  // Nothing is counted until the real library arrives.
+  const library = loading ? [] : courses;
   const coursesIn = (category: string) =>
-    courses.filter((course) => course.category === category).length;
-  const lessonTotal = courses.reduce((total, course) => total + lessonCount(course), 0);
-  const instructors = [...new Set(courses.map((course) => course.instructor))];
+    library.filter((course) => course.category === category).length;
+  const lessonTotal = library.reduce((total, course) => total + lessonCount(course), 0);
+  const instructors = [...new Set(library.map((course) => course.instructor))];
   const mainRef = useRef<HTMLElement>(null);
-  useScrollReveal(mainRef);
+  // Look again once the courses arrive, so the new course cards slide in too.
+  useScrollReveal(mainRef, loading);
   return (
     <>
       <PublicHeader active="home" user={user} onSignOut={onSignOut} />
@@ -619,7 +637,12 @@ function Home({
                 </Button>
               )}
             </div>
-            <div className="hero-proof">
+            {/* Holds its space while loading so the headline does not jump. */}
+            <div
+              className="hero-proof"
+              data-loading={loading ? "" : undefined}
+              aria-hidden={loading || undefined}
+            >
               <span className="avatar-stack">
                 {instructors.slice(0, 3).map((name) => (
                   <i key={name} title={name}>
@@ -629,7 +652,7 @@ function Home({
               </span>
               <p>
                 <b>
-                  {courses.length} {courses.length === 1 ? "course" : "courses"} ·{" "}
+                  {library.length} {library.length === 1 ? "course" : "courses"} ·{" "}
                   {lessonTotal} {lessonTotal === 1 ? "lesson" : "lessons"}
                 </b>
                 <br />
@@ -664,11 +687,15 @@ function Home({
               View all courses <Icon name="arrow" size={16} />
             </button>
           </div>
-          <div className="course-grid" data-reveal-group>
-            {getFeaturedCourses().map((c, i) => (
-              <CourseCard course={c} index={i} key={c.title} />
-            ))}
-          </div>
+          {loading ? (
+            <p className="panel-note">Loading courses...</p>
+          ) : (
+            <div className="course-grid" data-reveal-group>
+              {getFeaturedCourses().map((c, i) => (
+                <CourseCard course={c} index={i} key={c.title} />
+              ))}
+            </div>
+          )}
         </section>
         <section className="category-section">
           <NightSky />
@@ -684,7 +711,7 @@ function Home({
               return (
                 <button
                   key={name}
-                  disabled={count === 0}
+                  disabled={!loading && count === 0}
                   onClick={() => navigateTo({ page: "explore", category: name })}
                 >
                   <i>
@@ -693,9 +720,11 @@ function Home({
                   <span>
                     <b>{name}</b>
                     <small>
-                      {count === 0
-                        ? "Coming soon"
-                        : `${blurb} · ${count} ${count === 1 ? "course" : "courses"}`}
+                      {loading
+                        ? blurb
+                        : count === 0
+                          ? "Coming soon"
+                          : `${blurb} · ${count} ${count === 1 ? "course" : "courses"}`}
                     </small>
                   </span>
                   {count > 0 && <Icon name="arrow" size={16} />}
@@ -1031,8 +1060,9 @@ function CourseDetails({
                 <b>{course.instructor}</b>
               </div>
             </div>
-            {progress && progress.done > 0 && (
+            {progress && (
               <div className="course-progress">
+                <ProgressCircle percent={progress.percent} label={`${course.title} course progress`} />
                 <div className="progress-bar">
                   <i style={{ width: `${progress.percent}%` }} />
                 </div>
@@ -1143,6 +1173,18 @@ function CourseDetails({
             {startButton}
           </aside>
         </section>
+        {course.id && <div style={{ marginTop: 24 }}>
+          <FinalExamPanel
+            courseId={course.id}
+            courseTitle={course.title}
+            instructor={course.instructor}
+            learnerName={user ? memberName(user) : "Learner"}
+            learnerId={user?.id}
+            complete={Boolean(progress?.finished)}
+            staff={isStaff(user)}
+          />
+        </div>}
+        {isStaff(user) && <div style={{ marginTop: 24 }}><CertificateVerification /></div>}
       </main>
     </>
   );
@@ -1368,9 +1410,34 @@ function Dashboard({
 
 type LessonTracking = {
   done: boolean;
+  hasQuiz: boolean;
   onComplete: () => Promise<void>;
   onUndo: () => Promise<void>;
 };
+
+function ProgressCircle({ percent, label }: { percent: number; label: string }) {
+  const clamped = Math.max(0, Math.min(100, percent));
+  const radius = 24;
+  const circumference = 2 * Math.PI * radius;
+  return (
+    <div className="progress-circle" role="img" aria-label={`${label}: ${clamped}% complete`}>
+      <svg viewBox="0 0 60 60" aria-hidden="true">
+        <circle className="progress-circle-track" cx="30" cy="30" r={radius} />
+        <circle
+          className="progress-circle-value"
+          cx="30"
+          cy="30"
+          r={radius}
+          style={{
+            strokeDasharray: circumference,
+            strokeDashoffset: circumference - (circumference * clamped) / 100,
+          }}
+        />
+      </svg>
+      <b>{clamped}%</b>
+    </div>
+  );
+}
 
 function Lesson({
   course,
@@ -1396,7 +1463,7 @@ function Lesson({
   if (lesson?.video) included.push(["video", "A short video preview"]);
   if (lesson?.youtubeUrl) included.push(["play", "The full lesson video on YouTube"]);
 
-  const completesLesson = Boolean(tracking && !tracking.done);
+  const completesLesson = Boolean(tracking && !tracking.done && !tracking.hasQuiz);
   // Saves the lesson as complete (when tracking) before moving on.
   const moveOn = async () => {
     if (completesLesson && tracking) {
@@ -1433,6 +1500,7 @@ function Lesson({
         <button className="crumb" onClick={() => go("course", course)}>
           ← {course.title}
         </button>
+        <ProgressCircle percent={tracking?.done ? 100 : 0} label={`${title} lesson progress`} />
         <span>
           Lesson {lessonIndex + 1} of {total}
         </span>
@@ -1545,6 +1613,10 @@ function Lesson({
             </>
           )}
         </article>
+        {/* The quiz follows the lesson, once it has been started or completed. */}
+        {signedIn && lesson?.id && (started || tracking?.done) && (
+          <LessonQuiz lessonId={lesson.id} onMastery={tracking?.onComplete} />
+        )}
         <nav className="lesson-nav" aria-label="Lessons">
           {previousIndex === undefined ? (
             <Button variant="outline" onClick={() => go("course", course)}>
@@ -1566,6 +1638,8 @@ function Lesson({
             <Button onClick={() => void moveOn()} disabled={saving}>
               {saving
                 ? "Saving..."
+                : tracking?.hasQuiz && !tracking.done
+                  ? "Complete quiz to finish"
                 : nextIndex === undefined
                   ? completesLesson
                     ? "Complete course"
@@ -2305,6 +2379,7 @@ export default function App() {
       row.course_id === courseId && row.lesson_key === key;
     return {
       done: tracking.some(isSaved),
+      hasQuiz: Boolean(lesson.quiz),
       onComplete: async () => {
         await markLessonComplete(user.id, courseId, key);
         setProgress((current) =>
@@ -2386,7 +2461,9 @@ export default function App() {
   });
 
   // Learners only see published courses, so a draft leaves the public list.
-  const syncPublicCourse = (saved: Course) => {
+  const syncPublicCourse = (savedCourse: Course) => {
+    // Learner pages never hold quiz answer keys, even in a staff browser.
+    const saved = withoutAssessments(savedCourse);
     const others = courses.filter((item) => item.id !== saved.id);
     courses =
       saved.status === "published"
@@ -2476,7 +2553,8 @@ export default function App() {
     }
   };
 
-  if (courseLoadState === "loading") {
+  // The home page opens without waiting, so its animations are not held up.
+  if (courseLoadState === "loading" && waitsForCourses(page)) {
     return (
       <StatusScreen
         eyebrow="ELITE RC LEARNING HUB"
@@ -2508,6 +2586,7 @@ export default function App() {
   }
   // Staff pages stay open with an empty library so the first course can be added.
   if (
+    courseLoadState === "ready" &&
     courses.length === 0 &&
     ![...STAFF_PAGES, "auth", "reset-password"].includes(page)
   ) {
@@ -2586,7 +2665,9 @@ export default function App() {
   let content: ReactNode;
   switch (route.page) {
     case "home":
-      content = <Home user={user} onSignOut={signOut} />;
+      content = (
+        <Home user={user} onSignOut={signOut} loading={courseLoadState === "loading"} />
+      );
       break;
     case "about":
       content = <About user={user} onSignOut={signOut} />;

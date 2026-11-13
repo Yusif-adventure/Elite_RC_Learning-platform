@@ -98,6 +98,82 @@ already stable.
 - Record improvements for the next release instead of expanding Friday's
   scope.
 
+## Assessment implementation plan
+
+The assessment and certification work should be delivered in the following
+daily phases. Each phase should be completed and tested before moving to the
+next one.
+
+### Day 1 - Confirm the assessment design
+
+- Confirm the learner, instructor, staff, and certificate workflows.
+- Confirm the lesson quiz rules, including unlimited retakes.
+- Confirm the final-exam rules, including the pass mark and maximum of three
+  attempts.
+- Decide which course requirements must be completed before certification.
+- Define the question, answer choice, quiz, exam attempt, certificate, and
+  course-completion data fields.
+- Define the permissions and data-protection rules for answer keys and
+  assessment submissions.
+
+### Day 2 - Build the database and backend foundation
+
+- Add Supabase tables for quizzes, questions, answer choices, lesson
+  assessments, final exams, assessment attempts, course completion, and
+  certificates.
+- Add indexes, relationships, and row-level security policies.
+- Add backend endpoints for instructors to create, edit, reorder, and delete
+  questions and assessments.
+- Add learner endpoints for loading an assessment and submitting an attempt.
+- Calculate scores on the backend.
+- Enforce authorization, the three-attempt final-exam limit, and duplicate
+  certificate protection on the backend.
+
+### Day 3 - Build instructor assessment tools
+
+- Add quiz management to the course and lesson builder.
+- Allow instructors to create and edit multiple-choice questions.
+- Allow instructors to add, edit, remove, and reorder answer choices.
+- Allow instructors to select one correct answer and add an explanation.
+- Add final-exam configuration, including the pass mark.
+- Add validation for incomplete questions, missing correct answers, and invalid
+  pass marks.
+- Show clear save and validation errors.
+
+### Day 4 - Build the learner quiz experience
+
+- Display a lesson quiz from the relevant lesson page.
+- Allow learners to select answers and submit a quiz.
+- Show the score and question-by-question correct or incorrect feedback after
+  submission.
+- Show the correct answer and explanation after submission.
+- Allow learners to retake lesson quizzes.
+- Save and display quiz attempts and results across browsers and devices.
+- Prevent learners from seeing answer keys before submission.
+
+### Day 5 - Build final exams and certification
+
+- Display the final exam when the learner has completed the required course
+  content.
+- Show the score, pass/fail result, and remaining attempts after submission.
+- Enforce the three-attempt maximum and prevent further attempts after passing.
+- Mark the course as complete when all requirements are met and the learner
+  passes the final exam.
+- Generate one certificate with a unique certificate identifier.
+- Add certificate viewing, downloading, and staff verification.
+
+### Day 6 - Test, secure, and release
+
+- Test instructor creation, editing, deletion, ordering, and permissions.
+- Test learner quiz submissions, retakes, scoring, and feedback.
+- Test final-exam pass, fail, remaining-attempt, and all-attempts-used cases.
+- Test failed submissions to confirm they do not consume an attempt.
+- Test answer-key protection and row-level security.
+- Test course completion and certificate generation across refreshes and
+  multiple devices.
+- Run frontend and backend test suites, fix release-blocking issues, and
+  prepare the assessment release notes.
+
 ### Recommended fallback
 
 Do not release the current browser-only course storage as a shared member
@@ -216,6 +292,86 @@ development.
    local storage or a relational database record.
 4. The database should store media metadata and URLs, not large base64 files.
 
+### Learner assessments and certification
+
+The platform must support knowledge checks after lessons and a final
+certification exam at the end of a course.
+
+#### Lesson quizzes
+
+1. Instructors must be able to create a quiz and attach it to a lesson while
+   creating or editing a course.
+2. A lesson quiz must support multiple-choice questions.
+3. Each question must include:
+   - The question text
+   - A list of answer choices
+   - Exactly one correct answer
+   - Optional feedback or an explanation for the correct answer
+4. Instructors must be able to add, edit, remove, and reorder questions and
+   answer choices.
+5. Learners must be shown the quiz after completing or reaching the relevant
+   lesson.
+6. Learners must submit their selected answers and receive a score.
+7. After submission, the learner must be able to see:
+   - Which answers were correct
+   - Which answers were incorrect
+   - The correct answer for each missed question
+   - Any instructor-provided explanation
+8. Learners must be allowed to retake a lesson quiz without an attempt limit,
+   unless a future course configuration adds one.
+9. The system must save each learner's quiz attempts, score, answers, and
+   submission time so progress can be displayed consistently across devices.
+10. A learner must not be able to change submitted answers or access the answer
+    key before submitting the quiz.
+
+#### Final course examination
+
+1. Instructors must be able to create a final exam for a course using
+   multiple-choice questions.
+2. The final exam must support the same question, answer-choice, correct-answer,
+   explanation, editing, and ordering capabilities as lesson quizzes.
+3. Instructors must be able to configure the final exam's pass mark as a
+   percentage. The course must define a clear default pass mark if the
+   instructor does not change it.
+4. Learners must receive a score and pass/fail result after each submitted
+   attempt.
+5. Learners must have a maximum of three final-exam attempts per course.
+6. The system must show the learner how many final-exam attempts remain.
+7. A learner who fails all three attempts must not receive a certificate and
+   must see a clear message explaining the result and any available next step.
+8. A learner who meets or exceeds the pass mark must be marked as having passed
+   the course, and further final-exam attempts must not be required.
+9. Final-exam attempts must be stored with the selected answers, score,
+   pass/fail result, attempt number, and submission time.
+10. The final-exam answer key and explanations must be protected until the
+    learner submits the attempt.
+
+#### Course completion and certificates
+
+1. A certificate must be issued only when the learner has completed the
+   course requirements and passed the final exam.
+2. The certificate must identify the learner, course, instructor or provider,
+   completion date, and a unique certificate identifier.
+3. A learner must be able to view and download their certificate after passing.
+4. The learner's course completion and certificate status must remain available
+   after signing out, refreshing the browser, or using another device.
+5. Staff must be able to verify a certificate identifier and confirm whether it
+   is valid.
+6. Certificate issuance must be recorded so that refreshing the page or
+   revisiting a completed course cannot create duplicate certificates.
+
+#### Assessment administration and reliability
+
+1. Only authorized instructors or staff may create or change quizzes, final
+   exams, answer keys, pass marks, and certificate settings.
+2. Learners may read and submit assessments only for courses they can access.
+3. The backend must calculate scores and enforce the three-attempt final-exam
+   limit; these rules must not depend only on browser code.
+4. Save and submission failures must be shown clearly, and a failed submission
+   must not consume an attempt.
+5. Assessment data must be stored in the shared database rather than only in
+   browser local storage.
+
 ## Project structure
 
 ```text
@@ -269,6 +425,15 @@ src/
 - [`supabase/003_lesson_progress.sql`](./supabase/003_lesson_progress.sql):
   the table of completed lessons, which each member can only see and change for
   themselves.
+- [`supabase/004_assessments.sql`](./supabase/004_assessments.sql): quizzes,
+  questions, answer choices, assessment attempts, final exams, course
+  completion, certificates, indexes, and assessment row-level security.
+- [`supabase/005_protect_answer_keys.sql`](./supabase/005_protect_answer_keys.sql):
+  stops browsers reading quiz answer keys and explanations, and stops members
+  recording their own attempts, so only the backend scores quizzes.
+- [`supabase/006_assessment_fixes.sql`](./supabase/006_assessment_fixes.sql):
+  sets the final-exam pass mark default to 80%, leaves completions and
+  certificates to the backend, and hides final exams in draft courses.
 
 ## Running the project
 
@@ -358,11 +523,46 @@ The backend exposes:
 - `POST /api/courses` (staff only)
 - `PUT /api/courses/:id` (staff only)
 - `DELETE /api/courses/:id` (staff only)
+- `GET /api/lessons/:lessonId/assessment` (signed-in learner)
+- `GET /api/courses/:courseId/final-exam` (signed-in learner)
+- `POST /api/lessons/:lessonId/assessment` (staff or instructor)
+- `POST /api/courses/:courseId/final-exam` (staff or instructor)
+- `PUT /api/courses/:courseId/final-exam` (staff or instructor)
+- `PUT /api/quizzes/:quizId` (staff or instructor)
+- `POST /api/quizzes/:quizId/questions` (staff or instructor)
+- `PUT /api/questions/:questionId` (staff or instructor)
+- `DELETE /api/questions/:questionId` (staff or instructor)
+- `PUT /api/quizzes/:quizId/questions/reorder` (staff or instructor)
+- `DELETE /api/quizzes/:quizId` (staff or instructor)
+- `POST /api/quizzes/:quizId/attempts` (signed-in learner)
+- `GET /api/quizzes/:quizId/attempts` (signed-in learner: their own attempts,
+  newest first; `?review=latest` adds the review of the newest one)
+- `GET /api/staff/certificates/:identifier` (staff or instructor)
 - `POST /api/uploads` (staff only)
 
 Staff-only endpoints need an `Authorization: Bearer <access token>` header
 from a signed-in Supabase session. The frontend sends it automatically. Without
 a sign-in they answer `401`; with a member's sign-in they answer `403`.
+
+#### Quizzes in the course builder
+
+The course builder saves lesson quizzes and the final exam together with the
+course, through `POST /api/courses` and `PUT /api/courses/:id`. Each entry in
+`lessonContent` may carry a `quiz`, and the course may carry a `finalExam` with
+a `passMark`. The staff reads (`GET /api/staff/courses` and the save responses)
+return them with their answer keys; the public course reads never do.
+
+- Saving a course recreates its lessons, so the backend links each quiz to its
+  lesson's new row again. A quiz, question, or answer choice sent with its `id`
+  is edited in place, which keeps learners' attempts and saved answers.
+- `quiz: null` or `finalExam: null` removes it, and deletes learners' attempts
+  at it. Leaving the field out keeps what is saved, so an older page cannot
+  remove quizzes by accident.
+- Every question needs text, at least two answer choices with text, and exactly
+  one correct answer. The pass mark is a whole percentage from 1 to 100, and is
+  80 when left out. Lesson quizzes need 10 to 25 questions and final exams 50. These rules also apply to the separate final exam routes.
+- If `supabase/004_assessments.sql` has not been run, courses still load and
+  save, and saving one with a quiz explains which file to run.
 
 ### Thursday release runbooks
 
@@ -379,10 +579,15 @@ a sign-in they answer `401`; with a member's sign-in they answer `403`.
 5. Run [`supabase/003_lesson_progress.sql`](./supabase/003_lesson_progress.sql).
    Until it is run, the app still works but does not save lesson progress, and
    **My learning** says progress tracking is not switched on yet.
-6. Copy the project URL, anon key, and service role key into `backend/.env`,
+6. Run [`supabase/004_assessments.sql`](./supabase/004_assessments.sql) to
+   enable quizzes, final exams, attempts, completion, and certificates.
+7. Run [`supabase/005_protect_answer_keys.sql`](./supabase/005_protect_answer_keys.sql).
+   Without it, anyone with the public anon key can read quiz answer keys.
+8. Run [`supabase/006_assessment_fixes.sql`](./supabase/006_assessment_fixes.sql).
+9. Copy the project URL, anon key, and service role key into `backend/.env`,
    and the URL and anon key into `frontend/.env`.
-7. Start the backend and verify `GET http://localhost:5000/api/status`.
-8. Make at least one staff account (see [Staff access](#staff-access)).
+10. Start the backend and verify `GET http://localhost:5000/api/status`.
+11. Make at least one staff account (see [Staff access](#staff-access)).
 
 The first migration creates normalized course, objective, section, lesson, and
 resource tables. It also seeds two courses and creates public-read storage
@@ -392,7 +597,27 @@ published courses but cannot change anything. The third stores which lessons
 each member has completed. The browser reads and writes it directly with the
 member's own sign-in, and row-level security keeps every member to their own
 rows. Lessons are identified by section and title, because saving a course
-replaces its lessons, so renaming a lesson resets its progress.
+replaces its lessons, so renaming a lesson resets its progress. The fourth
+creates assessment content and attempt records. The fifth makes answer keys
+and explanations available only to the backend service role, which calculates
+scores and enforces final-exam limits before returning feedback to learners.
+The sixth leaves completions and certificates to the backend too.
+
+### Assessment rules the backend enforces
+
+- A lesson quiz has 10 to 25 questions, can be retaken without limit, and
+  counts toward lesson completion only when the learner scores 100%.
+- A final exam has exactly 50 questions, a pass mark that defaults to 80%, and
+  allows three attempts. Once a member passes, no further attempts are taken.
+- Every question has at least two choices and exactly one correct choice.
+- Members never receive `isCorrect` or `explanation` before submitting. The
+  attempt response returns the review, including the correct choice and the
+  explanation. Staff loading an assessment get both.
+- Members can only load or answer assessments in published courses.
+- Each lesson in `lessonContent` has an `id`, which learner pages use to load
+  its quiz. The id changes whenever the course is saved.
+- If the backend cannot finish a submission (for example, the certificate
+  cannot be issued), the attempt is not counted.
 
 ### Staff access
 

@@ -1,6 +1,6 @@
 // Trial: home page motion (gliding planes and slide-ins).
 // Kept apart from App.tsx so it is easy to keep, change, or remove.
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 // Top-down plane silhouette, nose pointing right so it follows its route.
 const PLANE =
@@ -162,13 +162,24 @@ export function NightSky() {
 
 // Slides in each [data-reveal] element, and each child of a [data-reveal-group],
 // when it scrolls into view. Items arriving together follow one another.
-export function useScrollReveal(root: RefObject<HTMLElement>) {
+// When `contentKey` changes it looks again, so items added later (such as
+// courses that arrive after the page opens) slide in too.
+export function useScrollReveal(root: RefObject<HTMLElement>, contentKey?: unknown) {
+  // Kept across those second looks, so an item still sliding in gets its own
+  // transitions back. Cleared only when the page goes away.
+  const timers = useRef<number[]>([]);
+  useEffect(() => {
+    const pending = timers.current;
+    return () => pending.forEach((timer) => window.clearTimeout(timer));
+  }, []);
+
   useEffect(() => {
     const container = root.current;
     if (!container) return;
+    // Items already shown are left alone, so they do not hide and slide in again.
     const targets = Array.from(
       container.querySelectorAll<HTMLElement>("[data-reveal], [data-reveal-group] > *"),
-    );
+    ).filter((element) => !element.classList.contains("revealed"));
     if (
       !("IntersectionObserver" in window) ||
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -176,7 +187,6 @@ export function useScrollReveal(root: RefObject<HTMLElement>) {
       targets.forEach((element) => element.classList.add("revealed"));
       return;
     }
-    const timers: number[] = [];
     const observer = new IntersectionObserver(
       (entries) => {
         entries
@@ -188,7 +198,7 @@ export function useScrollReveal(root: RefObject<HTMLElement>) {
             element.style.transitionDelay = `${delay}ms`;
             element.classList.add("reveal-anim", "revealed");
             // Hand back the element's own transitions (such as card hover) once it lands.
-            timers.push(
+            timers.current.push(
               window.setTimeout(() => {
                 element.classList.remove("reveal-anim");
                 element.style.transitionDelay = "";
@@ -199,9 +209,6 @@ export function useScrollReveal(root: RefObject<HTMLElement>) {
       { rootMargin: "0px 0px -12% 0px" },
     );
     targets.forEach((element) => observer.observe(element));
-    return () => {
-      observer.disconnect();
-      timers.forEach((timer) => window.clearTimeout(timer));
-    };
-  }, [root]);
+    return () => observer.disconnect();
+  }, [root, contentKey]);
 }

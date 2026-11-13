@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parsePath, parseRoute, routePath } from "../routes.ts";
+import { parsePath, parseRoute, routePath, waitsForCourses } from "../routes.ts";
 
 const addresses = [
   ["/", { page: "home" }],
@@ -83,4 +83,11 @@ test("signing in only returns to pages on this site", () => {
 test("a saved address with filters opens the same page", () => {
   assert.deepEqual(parsePath("/courses?category=IoT"), { page: "explore", category: "IoT" });
   assert.deepEqual(parsePath("/courses/abc/lessons/2"), { page: "lesson", courseId: "abc", lessonIndex: 1 });
+});
+
+test("the home page opens without waiting for the course library", () => {
+  assert.equal(waitsForCourses("home"), false);
+  for (const page of ["explore", "course", "lesson", "dashboard", "admin"] as const) {
+    assert.equal(waitsForCourses(page), true, page);
+  }
 });
