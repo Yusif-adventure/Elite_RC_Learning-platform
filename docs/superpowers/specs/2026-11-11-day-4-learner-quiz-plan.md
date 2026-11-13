@@ -3,6 +3,10 @@
 Date: 2026-11-11
 Branch: `Dev-branch` (checked at `e5b0e8d Add assessment backend foundation`)
 
+> **Status (2026-11-13):** done. Day 3 was merged and Day 4 was built
+> following this plan. See `2026-11-13-day-5-handoff.md` for where things
+> stand and what Day 5 needs.
+
 ## Verdict
 
 Updated 2026-11-12. The Day 2 defects below are fixed on `Dev-branch`. Day 4
