@@ -20,9 +20,20 @@ import {
 } from "./features/staff/courseApi";
 import { ConfirmDialog, errorText, useToast } from "./features/staff/Feedback";
 import { useStaffData } from "./features/staff/useStaffData";
+import { withoutAssessments } from "./features/staff/quizDrafts";
+import { LessonQuiz } from "./features/quiz/LessonQuiz";
+import { FinalExamPanel } from "./features/quiz/FinalExamPanel";
+import { CertificateVerification } from "./features/quiz/CertificateVerification";
 import type { Member, Role } from "./staffStats";
 import { supabase } from "./supabaseClient";
-import { parsePath, parseRoute, routePath, type Page, type Route } from "./routes";
+import {
+  parsePath,
+  parseRoute,
+  routePath,
+  waitsForCourses,
+  type Page,
+  type Route,
+} from "./routes";
 import { CATEGORIES, catalogCategories } from "./categories";
 import {
   courseProgress,
@@ -581,16 +592,23 @@ function CourseCard({ course, index = 0 }: { course: Course; index?: number }) {
 function Home({
   user,
   onSignOut,
+  loading = false,
 }: {
   user?: User | null;
   onSignOut?: () => void;
+  // True while the course library is still on its way. The page shows straight
+  // away so its animations start, and the course parts fill in when it arrives.
+  loading?: boolean;
 }) {
+  // Nothing is counted until the real library arrives.
+  const library = loading ? [] : courses;
   const coursesIn = (category: string) =>
-    courses.filter((course) => course.category === category).length;
-  const lessonTotal = courses.reduce((total, course) => total + lessonCount(course), 0);
-  const instructors = [...new Set(courses.map((course) => course.instructor))];
+    library.filter((course) => course.category === category).length;
+  const lessonTotal = library.reduce((total, course) => total + lessonCount(course), 0);
+  const instructors = [...new Set(library.map((course) => course.instructor))];
   const mainRef = useRef<HTMLElement>(null);
-  useScrollReveal(mainRef);
+  // Look again once the courses arrive, so the new course cards slide in too.
+  useScrollReveal(mainRef, loading);
   return (
     <>
       <PublicHeader active="home" user={user} onSignOut={onSignOut} />
@@ -619,7 +637,12 @@ function Home({
                 </Button>
               )}
             </div>
-            <div className="hero-proof">
+            {/* Holds its space while loading so the headline does not jump. */}
+            <div
+              className="hero-proof"
+              data-loading={loading ? "" : undefined}
+              aria-hidden={loading || undefined}
+            >
               <span className="avatar-stack">
                 {instructors.slice(0, 3).map((name) => (
                   <i key={name} title={name}>
@@ -629,7 +652,7 @@ function Home({
               </span>
               <p>
                 <b>
-                  {courses.length} {courses.length === 1 ? "course" : "courses"} ·{" "}
+                  {library.length} {library.length === 1 ? "course" : "courses"} ·{" "}
                   {lessonTotal} {lessonTotal === 1 ? "lesson" : "lessons"}
                 </b>
                 <br />
@@ -664,11 +687,15 @@ function Home({
               View all courses <Icon name="arrow" size={16} />
             </button>
           </div>
-          <div className="course-grid" data-reveal-group>
-            {getFeaturedCourses().map((c, i) => (
-              <CourseCard course={c} index={i} key={c.title} />
-            ))}
-          </div>
+          {loading ? (
+            <p className="panel-note">Loading courses...</p>
+          ) : (
+            <div className="course-grid" data-reveal-group>
+              {getFeaturedCourses().map((c, i) => (
+                <CourseCard course={c} index={i} key={c.title} />
+              ))}
+            </div>
+          )}
         </section>
         <section className="category-section">
           <NightSky />
@@ -684,7 +711,7 @@ function Home({
               return (
                 <button
                   key={name}
-                  disabled={count === 0}
+                  disabled={!loading && count === 0}
                   onClick={() => navigateTo({ page: "explore", category: name })}
                 >
                   <i>
@@ -693,9 +720,11 @@ function Home({
                   <span>
                     <b>{name}</b>
                     <small>
-                      {count === 0
-                        ? "Coming soon"
-                        : `${blurb} · ${count} ${count === 1 ? "course" : "courses"}`}
+                      {loading
+                        ? blurb
+                        : count === 0
+                          ? "Coming soon"
+                          : `${blurb} · ${count} ${count === 1 ? "course" : "courses"}`}
                     </small>
                   </span>
                   {count > 0 && <Icon name="arrow" size={16} />}
@@ -983,47 +1012,7 @@ function CourseDetails({
   tracking?: ProgressRow[];
 }) {
   const [open, setOpen] = useState(0);
-  const [examAnswers, setExamAnswers] = useState<number[]>([]);
-  const [examResult, setExamResult] = useState<any>(null);
-  const [examBusy, setExamBusy] = useState(false);
-  const [examError, setExamError] = useState("");
-  const [attemptsUsed, setAttemptsUsed] = useState(0);
-  const [certificate, setCertificate] = useState<any>(null);
-  const [verifyCode, setVerifyCode] = useState("");
-  const [verifyResult, setVerifyResult] = useState<any>(null);
-  const exam = course.finalExam ?? [];
   const progress = tracking ? courseProgress(course, tracking) : undefined;
-  useEffect(() => {
-    if (!user || !course.id) return;
-    let active = true;
-    void (async () => {
-      const [attemptRows, certificateRows] = await Promise.all([
-        supabase.from("final_exam_attempts").select("id").eq("course_id", course.id),
-        supabase.from("certificates").select("certificate_id, issued_at").eq("course_id", course.id).maybeSingle(),
-      ]);
-      if (!active) return;
-      if (!attemptRows.error) setAttemptsUsed(attemptRows.data?.length ?? 0);
-      if (!certificateRows.error) setCertificate(certificateRows.data);
-    })();
-    return () => { active = false; };
-  }, [user?.id, course.id]);
-  const submitExam = async () => {
-    if (!course.id || examAnswers.length !== exam.length || examAnswers.some((answer) => answer < 0)) return;
-    setExamBusy(true); setExamError(""); setExamResult(null);
-    const { data, error } = await supabase.rpc("submit_final_exam", {
-      p_course_id: course.id,
-      p_answers: examAnswers.map((selectedIndex) => ({ selectedIndex })),
-    });
-    setExamBusy(false);
-    if (error) { setExamError(error.message); return; }
-    setExamResult(data);
-    setAttemptsUsed(data.attemptsUsed);
-    if (data.certificate) setCertificate({ certificate_id: data.certificate.certificateId, issued_at: data.certificate.issuedAt });
-  };
-  const verifyCertificate = async () => {
-    const { data, error } = await supabase.rpc("verify_certificate", { p_certificate_id: verifyCode });
-    setVerifyResult(error ? { valid: false } : data);
-  };
   const doneKeys = new Set(
     (tracking ?? []).filter((row) => row.course_id === course.id).map((row) => row.lesson_key),
   );
@@ -1183,54 +1172,18 @@ function CourseDetails({
             {startButton}
           </aside>
         </section>
-        {exam.length > 0 && (
-          <section className="content-card" style={{ marginTop: 24 }}>
-            <h2>Final exam</h2>
-            {!user ? <p>Sign in to take the final exam after completing all course lessons.</p>
-              : !progress?.finished ? <p>Complete all {progress?.total ?? lessonCount(course)} course lessons to unlock the final exam.</p>
-              : certificate ? <div className="lesson-done"><span>Course complete · Certificate {certificate.certificate_id}</span><button className="btn outline" onClick={() => window.print()}>View / download certificate</button></div>
-              : attemptsUsed >= 3 ? <p>You have used all three attempts. The final exam is now closed.</p>
-              : <>
-                <p>Pass with 70% or higher. Attempts remaining: {3 - attemptsUsed}.</p>
-                {exam.map((question, questionIndex) => (
-                  <fieldset key={questionIndex} style={{ margin: "20px 0", border: "1px solid var(--line)", borderRadius: 10, padding: 16 }}>
-                    <legend><b>{questionIndex + 1}. {question.prompt}</b></legend>
-                    {question.options.map((option, optionIndex) => <label key={optionIndex} style={{ display: "block", padding: 8 }}><input type="radio" name={`exam-${course.id}-${questionIndex}`} checked={examAnswers[questionIndex] === optionIndex} onChange={() => setExamAnswers((current) => { const updated = [...current]; updated[questionIndex] = optionIndex; return updated; })} /> {option}</label>)}
-                  </fieldset>
-                ))}
-                {examError && <p role="alert">{examError}</p>}
-                {examResult && <p role="status">Score: {examResult.score}% · {examResult.passed ? "Passed" : "Not passed"}. Attempts remaining: {examResult.attemptsRemaining}.</p>}
-                <Button disabled={examBusy || examAnswers.length !== exam.length || examAnswers.some((answer) => answer < 0)} onClick={() => void submitExam()}>{examBusy ? "Submitting…" : "Submit final exam"}</Button>
-              </>}
-            {certificate && <div className="certificate-print">
-              <aside className="certificate-side">
-                <div className="certificate-brand"><span className="certificate-brand-mark" aria-hidden="true">✦</span><span><b>ELITE RC</b><small>COMMUNITY LEARNING HUB</small></span></div>
-                <div className="certificate-heading"><p>CERTIFICATE</p><h2>OF ACHIEVEMENT</h2></div>
-              </aside>
-              <div className="certificate-medal-wrap" aria-hidden="true"><i /><i /><div className="certificate-medal"><span>✦</span><b>AWARDED<br />WITH HONOUR</b></div></div>
-              <div className="certificate-main">
-                <div className="certificate-topline"><span>PROUDLY PRESENTED TO</span><span>COURSE COMPLETION</span></div>
-                <h3 className="certificate-recipient">{memberName(user!)}</h3>
-                <div className="certificate-rule"><i /></div>
-                <p className="certificate-intro">in recognition of successfully completing</p>
-                <h4 className="certificate-course">{course.title}</h4>
-                <p className="certificate-copy">and passing the final examination with distinction.</p>
-                <div className="certificate-bottom">
-                  <div><span>ISSUED</span><b>{new Date(certificate.issued_at).toLocaleDateString()}</b></div>
-                  <div className="certificate-signature"><i /><span>{course.instructor}</span><small>Course Instructor</small></div>
-                  <div className="certificate-id"><span>CERTIFICATE ID</span><b>{certificate.certificate_id}</b></div>
-                </div>
-                <button className="btn outline certificate-download" onClick={() => window.print()}>Download / print certificate</button>
-              </div>
-            </div>}
-          </section>
-        )}
-        {isStaff(user) && <section className="content-card" style={{ marginTop: 24 }}>
-          <h2>Verify a certificate</h2>
-          <p>Confirm a learner’s certificate using its unique identifier.</p>
-          <div style={{ display: "flex", gap: 8 }}><input aria-label="Certificate identifier" value={verifyCode} onChange={(event) => setVerifyCode(event.target.value)} placeholder="ELITE-…" /><Button onClick={() => void verifyCertificate()}>Verify</Button></div>
-          {verifyResult && <p role="status">{verifyResult.valid ? `Verified: ${verifyResult.learnerName} completed ${verifyResult.courseTitle} on ${new Date(verifyResult.issuedAt).toLocaleDateString()}.` : "No valid certificate was found for that identifier."}</p>}
-        </section>}
+        {course.id && <div style={{ marginTop: 24 }}>
+          <FinalExamPanel
+            courseId={course.id}
+            courseTitle={course.title}
+            instructor={course.instructor}
+            learnerName={user ? memberName(user) : "Learner"}
+            learnerId={user?.id}
+            complete={Boolean(progress?.finished)}
+            staff={isStaff(user)}
+          />
+        </div>}
+        {isStaff(user) && <div style={{ marginTop: 24 }}><CertificateVerification /></div>}
       </main>
     </>
   );
@@ -1633,6 +1586,8 @@ function Lesson({
             </>
           )}
         </article>
+        {/* The quiz follows the lesson, once it has been started or completed. */}
+        {signedIn && lesson?.id && (started || tracking?.done) && <LessonQuiz lessonId={lesson.id} />}
         <nav className="lesson-nav" aria-label="Lessons">
           {previousIndex === undefined ? (
             <Button variant="outline" onClick={() => go("course", course)}>
@@ -2474,7 +2429,9 @@ export default function App() {
   });
 
   // Learners only see published courses, so a draft leaves the public list.
-  const syncPublicCourse = (saved: Course) => {
+  const syncPublicCourse = (savedCourse: Course) => {
+    // Learner pages never hold quiz answer keys, even in a staff browser.
+    const saved = withoutAssessments(savedCourse);
     const others = courses.filter((item) => item.id !== saved.id);
     courses =
       saved.status === "published"
@@ -2564,7 +2521,8 @@ export default function App() {
     }
   };
 
-  if (courseLoadState === "loading") {
+  // The home page opens without waiting, so its animations are not held up.
+  if (courseLoadState === "loading" && waitsForCourses(page)) {
     return (
       <StatusScreen
         eyebrow="ELITE RC LEARNING HUB"
@@ -2596,6 +2554,7 @@ export default function App() {
   }
   // Staff pages stay open with an empty library so the first course can be added.
   if (
+    courseLoadState === "ready" &&
     courses.length === 0 &&
     ![...STAFF_PAGES, "auth", "reset-password"].includes(page)
   ) {
@@ -2674,7 +2633,9 @@ export default function App() {
   let content: ReactNode;
   switch (route.page) {
     case "home":
-      content = <Home user={user} onSignOut={signOut} />;
+      content = (
+        <Home user={user} onSignOut={signOut} loading={courseLoadState === "loading"} />
+      );
       break;
     case "about":
       content = <About user={user} onSignOut={signOut} />;

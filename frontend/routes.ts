@@ -22,6 +22,13 @@ export type Route =
 
 export type Page = Route["page"];
 
+// The home page opens straight away, so its animations start without waiting
+// for the course library; it fills in the course parts when they arrive.
+// Every other page needs the courses before it can show anything.
+export function waitsForCourses(page: Page): boolean {
+  return page !== "home";
+}
+
 const fixedPages: Record<string, Route> = {
   "/": { page: "home" },
   "/about": { page: "about" },
