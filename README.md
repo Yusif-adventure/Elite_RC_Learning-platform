@@ -535,6 +535,8 @@ The backend exposes:
 - `PUT /api/quizzes/:quizId/questions/reorder` (staff or instructor)
 - `DELETE /api/quizzes/:quizId` (staff or instructor)
 - `POST /api/quizzes/:quizId/attempts` (signed-in learner)
+- `GET /api/quizzes/:quizId/attempts` (signed-in learner: their own attempts,
+  newest first; `?review=latest` adds the review of the newest one)
 - `GET /api/staff/certificates/:identifier` (staff or instructor)
 - `POST /api/uploads` (staff only)
 

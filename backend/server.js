@@ -1211,6 +1211,66 @@ app.delete("/api/quizzes/:quizId", requireStaff, async (req, res) => {
   res.status(204).end();
 });
 
+// Members only reach assessments in published courses; staff reach every one.
+async function canReachAssessment(user, assessment) {
+  if (isStaff(user)) return true;
+  const status = assessment.type === "lesson"
+    ? await courseStatusForLesson(assessment.lessonId)
+    : (await readSingleReference("courses", "id", assessment.courseId)).status;
+  return status === "published";
+}
+
+// What a learner sees after submitting: for each question they answered, their
+// choice, the correct choice, and the explanation. `quiz` must include the
+// answer key. Questions added since the attempt are left out, and so are
+// questions whose correct answer cannot be found.
+function reviewAnswers(quiz, answers) {
+  return quiz.questions.flatMap((question) => {
+    const selectedChoiceId = answers?.[question.id];
+    const correctChoice = question.choices.find((choice) => choice.isCorrect);
+    if (typeof selectedChoiceId !== "string" || !correctChoice) return [];
+    return [{
+      questionId: question.id,
+      selectedChoiceId,
+      correctChoiceId: correctChoice.id,
+      correct: selectedChoiceId === correctChoice.id,
+      explanation: question.explanation,
+    }];
+  });
+}
+
+// The signed-in member's attempts at a quiz, newest first, so results follow
+// them to any browser or device. `?review=latest` adds the review of the
+// newest attempt, which is the only way to see answers again after a refresh.
+app.get("/api/quizzes/:quizId/attempts", requireUser, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  try {
+    const assessment = await assessmentForQuiz(req.params.quizId);
+    if (!(await canReachAssessment(req.user, assessment))) {
+      res.status(404).json({ error: "Assessment or course content was not found." });
+      return;
+    }
+    const { data, error } = await supabaseAdmin
+      .from("assessment_attempts")
+      .select("id, attempt_number, score, passed, submitted_at, answers")
+      .eq("user_id", req.user.id)
+      .eq("quiz_id", req.params.quizId)
+      .order("attempt_number", { ascending: false });
+    if (error) throw error;
+    const rows = [...(data || [])].sort((a, b) => b.attempt_number - a.attempt_number);
+    const review = req.query.review === "latest" && rows.length
+      ? reviewAnswers(await readQuiz(req.params.quizId, true), rows[0].answers)
+      : null;
+    res.json({
+      attempts: rows.map(({ answers: _answers, ...attempt }) => ({ ...attempt, score: Number(attempt.score) })),
+      attemptsRemaining: assessment.type === "final" ? Math.max(0, FINAL_EXAM_ATTEMPTS - rows.length) : null,
+      review,
+    });
+  } catch (error) {
+    sendAssessmentError(res, error);
+  }
+});
+
 // Records the completion and issues the one certificate for this member and
 // course. Running it again returns the certificate that already exists.
 async function completeCourse(userId, courseId) {
@@ -1239,14 +1299,9 @@ app.post("/api/quizzes/:quizId/attempts", requireUser, async (req, res) => {
   if (!requireSupabaseAdmin(res)) return;
   try {
     const assessment = await assessmentForQuiz(req.params.quizId);
-    if (!isStaff(req.user)) {
-      const status = assessment.type === "lesson"
-        ? await courseStatusForLesson(assessment.lessonId)
-        : (await readSingleReference("courses", "id", assessment.courseId)).status;
-      if (status !== "published") {
-        res.status(404).json({ error: "Assessment or course content was not found." });
-        return;
-      }
+    if (!(await canReachAssessment(req.user, assessment))) {
+      res.status(404).json({ error: "Assessment or course content was not found." });
+      return;
     }
     const quiz = await readQuiz(req.params.quizId, true);
     const answers = req.body?.answers;
@@ -1320,13 +1375,7 @@ app.post("/api/quizzes/:quizId/attempts", requireUser, async (req, res) => {
       attemptsRemaining: assessment.type === "final" ? FINAL_EXAM_ATTEMPTS - attemptNumber : null,
       passed,
       certificate,
-      review: answerRows.map(({ question, selected }) => ({
-        questionId: question.id,
-        selectedChoiceId: selected.id,
-        correctChoiceId: question.choices.find((choice) => choice.isCorrect).id,
-        correct: selected.isCorrect,
-        explanation: question.explanation,
-      })),
+      review: reviewAnswers(quiz, answers),
     });
   } catch (error) {
     sendAssessmentError(res, error);

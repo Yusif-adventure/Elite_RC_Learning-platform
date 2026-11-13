@@ -1025,6 +1025,80 @@ test("a passing submission that cannot issue the certificate does not use up an 
   assert.equal(typeof retry.certificate.certificate_identifier, "string");
 });
 
+function loadAttempts(quizId, { token = MEMBER_TOKEN, review = false } = {}) {
+  return fetch(`${api}/api/quizzes/${quizId}/attempts${review ? "?review=latest" : ""}`, {
+    headers: signedIn(token),
+  });
+}
+
+test("a member's quiz results come back newest first, with the latest review, on any device", async () => {
+  await createCourse();
+  const quiz = await createLessonQuiz(fake.db.course_lessons[0].id);
+  assert.equal((await submit(quiz.id, answersFor(quiz, 4))).status, 201);
+  assert.equal((await submit(quiz.id, answersFor(quiz, 9))).status, 201);
+
+  const response = await loadAttempts(quiz.id, { review: true });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual(body.attempts.map((attempt) => [attempt.attempt_number, attempt.score]), [[2, 90], [1, 40]]);
+  assert.equal("answers" in body.attempts[0], false);
+  assert.equal(body.attemptsRemaining, null);
+  assert.equal(body.review.length, 10);
+  assert.equal(body.review[8].correct, true);
+  assert.equal(body.review[9].correct, false);
+  assert.equal(body.review[9].correctChoiceId, quiz.questions[9].choices[0].id);
+  assert.equal(body.review[9].explanation, "The ailerons control roll.");
+
+  const withoutReview = await (await loadAttempts(quiz.id)).json();
+  assert.equal(withoutReview.review, null);
+});
+
+test("a member with no attempts gets an empty history and no answer key", async () => {
+  await createCourse();
+  const quiz = await createLessonQuiz(fake.db.course_lessons[0].id);
+  const body = await (await loadAttempts(quiz.id, { review: true })).json();
+  assert.deepEqual(body.attempts, []);
+  assert.equal(body.review, null);
+});
+
+test("members only see their own quiz attempts", async () => {
+  await createCourse();
+  const quiz = await createLessonQuiz(fake.db.course_lessons[0].id);
+  assert.equal((await submit(quiz.id, answersFor(quiz))).status, 201);
+  const other = await (await loadAttempts(quiz.id, { token: STAFF_TOKEN, review: true })).json();
+  assert.deepEqual(other.attempts, []);
+  assert.equal(other.review, null);
+});
+
+test("the attempt history skips questions added after the attempt", async () => {
+  await createCourse();
+  const quiz = await createLessonQuiz(fake.db.course_lessons[0].id);
+  await submit(quiz.id, answersFor(quiz));
+  assert.equal((await sendJson("POST", `/api/quizzes/${quiz.id}/questions`, assessment().questions[0])).status, 201);
+
+  const body = await (await loadAttempts(quiz.id, { review: true })).json();
+  assert.equal(body.review.length, 10);
+  assert.equal(body.attempts[0].score, 100);
+});
+
+test("final exam history says how many attempts remain", async () => {
+  const created = await createCourse();
+  const exam = await createFinalExam(created.id);
+  await submit(exam.id, answersFor(exam, 0));
+  const body = await (await loadAttempts(exam.id)).json();
+  assert.equal(body.attemptsRemaining, 2);
+  assert.equal(body.attempts[0].passed, false);
+});
+
+test("quiz history needs a sign-in and a published course", async () => {
+  const draft = await createCourse({ status: "draft" });
+  const quiz = await createLessonQuiz(fake.db.course_lessons[0].id);
+  assert.equal((await fetch(`${api}/api/quizzes/${quiz.id}/attempts`)).status, 401);
+  await assertJsonError(await loadAttempts(quiz.id), 404);
+  await assertJsonError(await loadAttempts(randomId()), 404);
+  assert.equal(draft.status, "draft");
+});
+
 test("without the secret key the member list explains the problem", async () => {
   const response = await staffGet("/api/staff/members", { base: apiWithoutServiceKey });
 
