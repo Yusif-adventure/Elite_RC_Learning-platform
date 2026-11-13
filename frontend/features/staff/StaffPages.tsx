@@ -59,6 +59,7 @@ export type StaffCourse = {
     video?: CourseResource;
     youtubeUrl?: string;
   }[];
+  finalExam?: { prompt: string; options: string[]; correctIndex: number }[];
   // Only on the staff course list.
   createdBy?: string | null;
   createdAt?: string;

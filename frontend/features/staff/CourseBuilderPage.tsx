@@ -398,6 +398,11 @@ export function CourseBuilderPage({
   const [sections, setSections] = useState<SectionDraft[]>(() =>
     editingCourse ? draftsFromCourse(editingCourse) : [emptySection()],
   );
+  const [examQuestions, setExamQuestions] = useState(() =>
+    editingCourse?.finalExam?.length
+      ? editingCourse.finalExam.map((question) => ({ ...question, options: [...question.options] }))
+      : [{ prompt: "", options: ["", "", "", ""], correctIndex: 0 }],
+  );
   const [saving, setSaving] = useState<false | "draft" | "published">(false);
   const [uploadsInProgress, setUploadsInProgress] = useState(0);
   const [error, setError] = useState("");
@@ -554,6 +559,13 @@ export function CourseBuilderPage({
               : undefined,
           })),
       ),
+      finalExam: examQuestions
+        .filter((question) => question.prompt.trim() && question.options.every((option) => option.trim()))
+        .map((question) => ({
+          prompt: question.prompt.trim(),
+          options: question.options.map((option) => option.trim()),
+          correctIndex: question.correctIndex,
+        })),
     };
   };
 
@@ -778,8 +790,29 @@ export function CourseBuilderPage({
           </section>
 
           <section className="panel form-card">
+            <FormStep number={3} title="Final exam" description="Add at least one multiple choice question. Learners need 70% to pass and have up to three attempts." />
+            <div className="form-curriculum">
+              {examQuestions.map((question, index) => (
+                <div className="lesson-builder-card" key={index}>
+                  <div className="form-group-head">
+                    <b>Question {index + 1}</b>
+                    {examQuestions.length > 1 && <RemoveButton onClick={() => setExamQuestions((current) => current.filter((_, i) => i !== index))}>Remove question</RemoveButton>}
+                  </div>
+                  <Field label="Question"><textarea rows={2} value={question.prompt} onChange={(event) => setExamQuestions((current) => current.map((item, i) => i === index ? { ...item, prompt: event.target.value } : item))} placeholder="Enter the question" /></Field>
+                  {question.options.map((option, optionIndex) => (
+                    <Field key={optionIndex} label={`Option ${optionIndex + 1}`}>
+                      <div className="form-outcome"><input value={option} onChange={(event) => setExamQuestions((current) => current.map((item, i) => i === index ? { ...item, options: item.options.map((value, j) => j === optionIndex ? event.target.value : value) } : item))} placeholder={`Answer choice ${optionIndex + 1}`} /><label><input type="radio" name={`correct-${index}`} checked={question.correctIndex === optionIndex} onChange={() => setExamQuestions((current) => current.map((item, i) => i === index ? { ...item, correctIndex: optionIndex } : item))} /> Correct</label></div>
+                    </Field>
+                  ))}
+                </div>
+              ))}
+              <button type="button" className="form-add" onClick={() => setExamQuestions((current) => [...current, { prompt: "", options: ["", "", "", ""], correctIndex: 0 }])}>+ Add exam question</button>
+            </div>
+          </section>
+
+          <section className="panel form-card">
             <FormStep
-              number={3}
+              number={4}
               title="Sections and lessons"
               description="Organize the lessons and attach what learners need."
             />
