@@ -1,6 +1,20 @@
 import { useState, type DragEvent, type ReactNode } from "react";
 import { CATEGORY_NAMES } from "../../categories";
 import { uploadFile, type UploadKind } from "./courseApi";
+import { Field, FormIcon, RemoveButton } from "./formParts";
+import { QuizEditor, type QuizChange } from "./QuizEditor";
+import {
+  emptyFinalExam,
+  emptyQuiz,
+  finalExamDraftFrom,
+  finalExamFromDraft,
+  passMarkProblem,
+  quizDraftFrom,
+  quizFromDraft,
+  quizProblem,
+  type FinalExamDraft,
+  type QuizDraft,
+} from "./quizDrafts";
 import { StaffButton, StaffShell } from "./StaffPages";
 import type {
   CourseResource,
@@ -26,6 +40,7 @@ type LessonDraft = {
   slides: CourseResource[];
   video?: CourseResource;
   youtubeUrl: string;
+  quiz: QuizDraft | null;
 };
 
 type SectionDraft = {
@@ -47,6 +62,7 @@ function emptyLesson(): LessonDraft {
     slides: [],
     video: undefined,
     youtubeUrl: "",
+    quiz: null,
   };
 }
 
@@ -68,6 +84,7 @@ function draftsFromCourse(course: StaffCourse): SectionDraft[] {
         slides: lesson.slides,
         video: lesson.video,
         youtubeUrl: lesson.youtubeUrl ?? "",
+        quiz: lesson.quiz ? quizDraftFrom(lesson.quiz) : null,
       })),
   }));
 }
@@ -91,69 +108,30 @@ function lessonHasContent(lesson: LessonDraft) {
     lesson.title.trim() ||
     lesson.slides.length ||
     lesson.video ||
-    lesson.youtubeUrl.trim(),
+    lesson.youtubeUrl.trim() ||
+    lesson.quiz,
   );
 }
+
+// Removing a quiz that has anything in it asks first, since saving the course
+// then deletes it along with learners' results.
+function quizHasContent(quiz: QuizDraft) {
+  return Boolean(
+    quiz.id ||
+    quiz.questions.some(
+      (question) =>
+        question.questionText.trim() ||
+        question.explanation.trim() ||
+        question.choices.some((choice) => choice.text.trim()),
+    ),
+  );
+}
+
+const lessonQuizName = (lesson: LessonDraft) => `Lesson "${lesson.title.trim()}" quiz`;
 
 function lessonHasBadLink(lesson: LessonDraft) {
   const link = lesson.youtubeUrl.trim();
   return Boolean(link) && !YOUTUBE_LINK.test(link);
-}
-
-const ICONS = {
-  upload: "M12 16V5m0 0L8 9m4-4 4 4M5 19h14",
-  file: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5",
-  close: "m6 6 12 12M18 6 6 18",
-  check: "m5 13 4 4L19 7",
-  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 20a7 7 0 0 1 14 0",
-  book: "M12 6.5C10.5 5 8 4.5 4 5v14c4-.5 6.5 0 8 1.5m0-14c1.5-1.5 4-2 8-1.5v14c-4-.5-6.5 0-8 1.5m0-14v14",
-};
-
-function FormIcon({
-  name,
-  size = 18,
-}: {
-  name: keyof typeof ICONS;
-  size?: number;
-}) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d={ICONS[name]} />
-    </svg>
-  );
-}
-
-function Field({
-  label,
-  required = false,
-  hint,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  hint?: string;
-  children: ReactNode;
-}) {
-  return (
-    <label className="field">
-      <span className="field-name">
-        {label}
-        {required && <i aria-hidden="true"> *</i>}
-      </span>
-      {children}
-      {hint && <small>{hint}</small>}
-    </label>
-  );
 }
 
 function FormStep({
@@ -256,27 +234,6 @@ function FileField({
       </label>
       {children}
     </div>
-  );
-}
-
-function RemoveButton({
-  children,
-  label,
-  onClick,
-}: {
-  children: ReactNode;
-  label?: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="form-remove"
-      aria-label={label}
-      onClick={onClick}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -398,10 +355,8 @@ export function CourseBuilderPage({
   const [sections, setSections] = useState<SectionDraft[]>(() =>
     editingCourse ? draftsFromCourse(editingCourse) : [emptySection()],
   );
-  const [examQuestions, setExamQuestions] = useState(() =>
-    editingCourse?.finalExam?.length
-      ? editingCourse.finalExam.map((question) => ({ ...question, options: [...question.options] }))
-      : [{ prompt: "", options: ["", "", "", ""], correctIndex: 0 }],
+  const [finalExam, setFinalExam] = useState<FinalExamDraft | null>(() =>
+    editingCourse?.finalExam ? finalExamDraftFrom(editingCourse.finalExam) : null,
   );
   const [saving, setSaving] = useState<false | "draft" | "published">(false);
   const [uploadsInProgress, setUploadsInProgress] = useState(0);
@@ -444,10 +399,17 @@ export function CourseBuilderPage({
         (lesson) => !lesson.title.trim() && lessonHasContent(lesson),
       )
     ) {
-      return "Give every lesson that has files or a video a title before saving.";
+      return "Give every lesson that has files, a video or a quiz a title before saving.";
     }
     if (allLessons.some(lessonHasBadLink)) {
       return "Use a full YouTube link for each lesson video, like https://www.youtube.com/watch?v=...";
+    }
+    for (const lesson of allLessons) {
+      const problem = lesson.quiz && quizProblem(lesson.quiz, lessonQuizName(lesson));
+      if (problem) return problem;
+    }
+    if (finalExam) {
+      return passMarkProblem(finalExam.passMark) || quizProblem(finalExam, "The final exam", "final");
     }
     return "";
   };
@@ -506,7 +468,11 @@ export function CourseBuilderPage({
   const removeLesson = (lesson: LessonDraft) => {
     if (
       lessonHasContent(lesson) &&
-      !window.confirm("Remove this lesson and its files from the course?")
+      !window.confirm(
+        lesson.quiz
+          ? "Remove this lesson, its files and its quiz from the course? Learners' results for the quiz are deleted when you save the course."
+          : "Remove this lesson and its files from the course?",
+      )
     ) {
       return;
     }
@@ -516,6 +482,23 @@ export function CourseBuilderPage({
         lessons: section.lessons.filter((item) => item.id !== lesson.id),
       })),
     );
+  };
+  const confirmQuizRemoval = (quiz: QuizDraft, what: string) =>
+    !quizHasContent(quiz) ||
+    window.confirm(
+      `Remove ${what}? Its questions, and learners' results for it, are deleted when you save the course.`,
+    );
+  const changeLessonQuiz = (lessonId: number, change: QuizChange) =>
+    updateLesson(lessonId, (lesson) => ({
+      quiz: lesson.quiz && change(lesson.quiz),
+    }));
+  const removeLessonQuiz = (lesson: LessonDraft) => {
+    if (lesson.quiz && confirmQuizRemoval(lesson.quiz, "this lesson's quiz")) {
+      updateLesson(lesson.id, () => ({ quiz: null }));
+    }
+  };
+  const removeFinalExam = () => {
+    if (finalExam && confirmQuizRemoval(finalExam, "the final exam")) setFinalExam(null);
   };
   const removeSection = (section: SectionDraft) => {
     const hasContent =
@@ -557,15 +540,11 @@ export function CourseBuilderPage({
             youtubeUrl: lesson.youtubeUrl.trim()
               ? normalizeLink(lesson.youtubeUrl)
               : undefined,
+            // null removes a quiz the lesson had before.
+            quiz: lesson.quiz ? quizFromDraft(lesson.quiz) : null,
           })),
       ),
-      finalExam: examQuestions
-        .filter((question) => question.prompt.trim() && question.options.every((option) => option.trim()))
-        .map((question) => ({
-          prompt: question.prompt.trim(),
-          options: question.options.map((option) => option.trim()),
-          correctIndex: question.correctIndex,
-        })),
+      finalExam: finalExam ? finalExamFromDraft(finalExam) : null,
     };
   };
 
@@ -790,29 +769,8 @@ export function CourseBuilderPage({
           </section>
 
           <section className="panel form-card">
-            <FormStep number={3} title="Final exam" description="Add at least one multiple choice question. Learners need 70% to pass and have up to three attempts." />
-            <div className="form-curriculum">
-              {examQuestions.map((question, index) => (
-                <div className="lesson-builder-card" key={index}>
-                  <div className="form-group-head">
-                    <b>Question {index + 1}</b>
-                    {examQuestions.length > 1 && <RemoveButton onClick={() => setExamQuestions((current) => current.filter((_, i) => i !== index))}>Remove question</RemoveButton>}
-                  </div>
-                  <Field label="Question"><textarea rows={2} value={question.prompt} onChange={(event) => setExamQuestions((current) => current.map((item, i) => i === index ? { ...item, prompt: event.target.value } : item))} placeholder="Enter the question" /></Field>
-                  {question.options.map((option, optionIndex) => (
-                    <Field key={optionIndex} label={`Option ${optionIndex + 1}`}>
-                      <div className="form-outcome"><input value={option} onChange={(event) => setExamQuestions((current) => current.map((item, i) => i === index ? { ...item, options: item.options.map((value, j) => j === optionIndex ? event.target.value : value) } : item))} placeholder={`Answer choice ${optionIndex + 1}`} /><label><input type="radio" name={`correct-${index}`} checked={question.correctIndex === optionIndex} onChange={() => setExamQuestions((current) => current.map((item, i) => i === index ? { ...item, correctIndex: optionIndex } : item))} /> Correct</label></div>
-                    </Field>
-                  ))}
-                </div>
-              ))}
-              <button type="button" className="form-add" onClick={() => setExamQuestions((current) => [...current, { prompt: "", options: ["", "", "", ""], correctIndex: 0 }])}>+ Add exam question</button>
-            </div>
-          </section>
-
-          <section className="panel form-card">
             <FormStep
-              number={4}
+              number={3}
               title="Sections and lessons"
               description="Organize the lessons and attach what learners need."
             />
@@ -959,6 +917,36 @@ export function CourseBuilderPage({
                           placeholder="https://www.youtube.com/watch?v=..."
                         />
                       </Field>
+                      {lesson.quiz ? (
+                        <div className="lesson-quiz">
+                          <div className="form-group-head">
+                            <b>Lesson quiz</b>
+                            <RemoveButton onClick={() => removeLessonQuiz(lesson)}>
+                              Remove quiz
+                            </RemoveButton>
+                          </div>
+                          <small className="quiz-hint">
+                            Learners take it after this lesson and can retake it as
+                            often as they like.
+                          </small>
+                          <QuizEditor
+                            quiz={lesson.quiz}
+                            kind="lesson"
+                            showProblems={showProblems}
+                            onChange={(change) => changeLessonQuiz(lesson.id, change)}
+                          />
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="form-add"
+                          onClick={() =>
+                            updateLesson(lesson.id, () => ({ quiz: emptyQuiz() }))
+                          }
+                        >
+                          + Add a quiz to this lesson
+                        </button>
+                      )}
                     </div>
                   ))}
                   <button
@@ -980,6 +968,63 @@ export function CourseBuilderPage({
                 + Add section
               </button>
             </div>
+          </section>
+
+          <section className="panel form-card">
+            <FormStep
+              number={4}
+              title="Final exam"
+              description="Learners take it at the end of the course. They get three attempts and must reach the pass mark to complete the course."
+            />
+            {finalExam ? (
+              <div className="form-fields">
+                <div className="final-exam-head">
+                  <Field
+                    label="Pass mark (%)"
+                    required
+                    hint="The lowest score that passes, from 1 to 100."
+                  >
+                    <input
+                      className={
+                        showProblems && passMarkProblem(finalExam.passMark)
+                          ? "invalid"
+                          : undefined
+                      }
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={finalExam.passMark}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setFinalExam((current) => current && { ...current, passMark: value });
+                      }}
+                    />
+                  </Field>
+                  <RemoveButton onClick={removeFinalExam}>Remove final exam</RemoveButton>
+                </div>
+                <QuizEditor
+                  quiz={finalExam}
+                  kind="final"
+                  showProblems={showProblems}
+                  onChange={(change) =>
+                    setFinalExam((current) => current && { ...current, ...change(current) })
+                  }
+                />
+              </div>
+            ) : (
+              <div className="final-exam-empty">
+                <p>This course has no final exam yet.</p>
+                <button
+                  type="button"
+                  className="form-add strong"
+                  onClick={() => setFinalExam(emptyFinalExam())}
+                >
+                  + Add a final exam
+                </button>
+              </div>
+            )}
           </section>
 
           <div className="form-savebar">
