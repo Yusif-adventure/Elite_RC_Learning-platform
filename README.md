@@ -428,9 +428,12 @@ src/
 - [`supabase/004_assessments.sql`](./supabase/004_assessments.sql): quizzes,
   questions, answer choices, assessment attempts, final exams, course
   completion, certificates, indexes, and assessment row-level security.
-- [`supabase/005_assessment_fixes.sql`](./supabase/005_assessment_fixes.sql):
-  keeps answer keys, explanations, and scores out of reach of the browser, and
-  sets the final-exam pass mark default to 80%.
+- [`supabase/005_protect_answer_keys.sql`](./supabase/005_protect_answer_keys.sql):
+  stops browsers reading quiz answer keys and explanations, and stops members
+  recording their own attempts, so only the backend scores quizzes.
+- [`supabase/006_assessment_fixes.sql`](./supabase/006_assessment_fixes.sql):
+  sets the final-exam pass mark default to 80%, leaves completions and
+  certificates to the backend, and hides final exams in draft courses.
 
 ## Running the project
 
@@ -539,6 +542,26 @@ Staff-only endpoints need an `Authorization: Bearer <access token>` header
 from a signed-in Supabase session. The frontend sends it automatically. Without
 a sign-in they answer `401`; with a member's sign-in they answer `403`.
 
+#### Quizzes in the course builder
+
+The course builder saves lesson quizzes and the final exam together with the
+course, through `POST /api/courses` and `PUT /api/courses/:id`. Each entry in
+`lessonContent` may carry a `quiz`, and the course may carry a `finalExam` with
+a `passMark`. The staff reads (`GET /api/staff/courses` and the save responses)
+return them with their answer keys; the public course reads never do.
+
+- Saving a course recreates its lessons, so the backend links each quiz to its
+  lesson's new row again. A quiz, question, or answer choice sent with its `id`
+  is edited in place, which keeps learners' attempts and saved answers.
+- `quiz: null` or `finalExam: null` removes it, and deletes learners' attempts
+  at it. Leaving the field out keeps what is saved, so an older page cannot
+  remove quizzes by accident.
+- Every question needs text, at least two answer choices with text, and exactly
+  one correct answer. The pass mark is a whole percentage from 1 to 100, and is
+  80 when left out. Lesson quizzes need 10 to 25 questions and final exams 50. These rules also apply to the separate final exam routes.
+- If `supabase/004_assessments.sql` has not been run, courses still load and
+  save, and saving one with a quiz explains which file to run.
+
 ### Thursday release runbooks
 
 - [Production checklist](./docs/release/2026-11-06-thursday-production-checklist.md)
@@ -556,13 +579,13 @@ a sign-in they answer `401`; with a member's sign-in they answer `403`.
    **My learning** says progress tracking is not switched on yet.
 6. Run [`supabase/004_assessments.sql`](./supabase/004_assessments.sql) to
    enable quizzes, final exams, attempts, completion, and certificates.
-7. Run [`supabase/005_assessment_fixes.sql`](./supabase/005_assessment_fixes.sql).
-   It closes direct database access to answer keys, explanations, and attempt
-   scores, which 004 left open.
-8. Copy the project URL, anon key, and service role key into `backend/.env`,
+7. Run [`supabase/005_protect_answer_keys.sql`](./supabase/005_protect_answer_keys.sql).
+   Without it, anyone with the public anon key can read quiz answer keys.
+8. Run [`supabase/006_assessment_fixes.sql`](./supabase/006_assessment_fixes.sql).
+9. Copy the project URL, anon key, and service role key into `backend/.env`,
    and the URL and anon key into `frontend/.env`.
-9. Start the backend and verify `GET http://localhost:5000/api/status`.
-10. Make at least one staff account (see [Staff access](#staff-access)).
+10. Start the backend and verify `GET http://localhost:5000/api/status`.
+11. Make at least one staff account (see [Staff access](#staff-access)).
 
 The first migration creates normalized course, objective, section, lesson, and
 resource tables. It also seeds two courses and creates public-read storage
@@ -573,9 +596,10 @@ each member has completed. The browser reads and writes it directly with the
 member's own sign-in, and row-level security keeps every member to their own
 rows. Lessons are identified by section and title, because saving a course
 replaces its lessons, so renaming a lesson resets its progress. The fourth
-creates assessment content and attempt records; answer keys are available only
-to the backend service role, which calculates scores and enforces final-exam
-limits before returning feedback to learners. The fifth tightens those rules.
+creates assessment content and attempt records. The fifth makes answer keys
+and explanations available only to the backend service role, which calculates
+scores and enforces final-exam limits before returning feedback to learners.
+The sixth leaves completions and certificates to the backend too.
 
 ### Assessment rules the backend enforces
 
@@ -585,14 +609,10 @@ limits before returning feedback to learners. The fifth tightens those rules.
 - Every question has at least two choices and exactly one correct choice.
 - Members never receive `isCorrect` or `explanation` before submitting. The
   attempt response returns the review, including the correct choice and the
-  explanation. Staff loading an assessment get both so they can edit it.
+  explanation. Staff loading an assessment get both.
 - Members can only load or answer assessments in published courses.
-- Sending a question or choice back with its `id` updates it in place, so
-  earlier attempts still match the questions they answered.
-- Each lesson in `lessonContent` has an `id`, which is used to load its quiz.
-  The id changes whenever the course is saved. Saving a course puts each quiz
-  back on the lesson with the same section and title, or on the lesson that
-  sends the quiz's id back as `quizId` (so a renamed lesson keeps its quiz).
+- Each lesson in `lessonContent` has an `id`, which learner pages use to load
+  its quiz. The id changes whenever the course is saved.
 - If the backend cannot finish a submission (for example, the certificate
   cannot be issued), the attempt is not counted.
 

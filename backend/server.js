@@ -141,6 +141,27 @@ const courseSelect = `
   )
 `;
 
+const quizSelect = `
+  id, title,
+  questions (id, question_text, explanation, position, answer_choices (id, choice_text, is_correct, position))
+`;
+
+// Staff also get each lesson quiz and the final exam, answer keys included,
+// so the course builder can edit them. Learners never get this select.
+const staffCourseSelect = `
+  *,
+  course_objectives (id, objective, position),
+  final_exams (pass_mark, quizzes (${quizSelect})),
+  course_sections (
+    id, title, position,
+    course_lessons (
+      id, title, position, youtube_url,
+      lesson_resources (id, resource_type, name, url, storage_path, mime_type, size_bytes, position),
+      lesson_assessments (quizzes (${quizSelect}))
+    )
+  )
+`;
+
 function requireSupabase(res) {
   if (!supabase) {
     res.status(503).json({
@@ -223,17 +244,32 @@ function getErrorMessage(error) {
   return error instanceof Error ? error.message : "Unexpected database error.";
 }
 
+// PostgREST embeds a one-to-one table as an object, or as a list on older versions.
+function embeddedOne(value) {
+  return (Array.isArray(value) ? value[0] : value) || null;
+}
+
+function savedQuiz(quiz) {
+  const questions = quiz.questions || [];
+  const choices = questions.flatMap((question) =>
+    (question.answer_choices || []).map((choice) => ({ ...choice, question_id: question.id })),
+  );
+  return publicQuiz(quiz, [...questions], choices, true);
+}
+
 function toCourse(row) {
   const sections = [...(row.course_sections || [])].sort((a, b) => a.position - b.position);
+  const finalExam = embeddedOne(row.final_exams);
   const lessonContent = sections.flatMap((section) =>
     [...(section.course_lessons || [])]
       .sort((a, b) => a.position - b.position)
       .map((lesson) => {
         const resources = [...(lesson.lesson_resources || [])]
           .sort((a, b) => a.position - b.position);
+        const quiz = embeddedOne(lesson.lesson_assessments)?.quizzes;
         return {
-          // Changes each time the course is saved. Use it to load the lesson's
-          // quiz, and use [section, title] to follow a lesson across saves.
+          // Changes each time the course is saved. Learner pages use it to
+          // load the lesson's quiz.
           id: lesson.id,
           title: lesson.title,
           section: section.title,
@@ -246,6 +282,7 @@ function toCourse(row) {
                 .map(({ name, url }) => ({ name, url }))[0]
             : undefined,
           youtubeUrl: lesson.youtube_url || undefined,
+          ...(quiz ? { quiz: savedQuiz(quiz) } : {}),
         };
       }),
   );
@@ -268,6 +305,9 @@ function toCourse(row) {
     sections: sections.map((section) => section.title),
     sampleLessons: lessonContent.slice(0, 3).map((lesson) => lesson.title),
     lessonContent,
+    ...(finalExam?.quizzes
+      ? { finalExam: { ...savedQuiz(finalExam.quizzes), passMark: Number(finalExam.pass_mark) } }
+      : {}),
   };
 }
 
@@ -313,6 +353,10 @@ function validateLessons(lessons, sections) {
       ...(lesson.youtubeUrl ? [lesson.youtubeUrl] : []),
     ];
     if (!links.every(isWebLink)) return `Lesson "${title}" has a file or video that is not a web link.`;
+    if (lesson.quiz != null) {
+      const quizProblem = validateQuiz(lesson.quiz, "lesson");
+      if (quizProblem) return `Lesson "${title}" quiz: ${quizProblem}`;
+    }
   }
   return null;
 }
@@ -331,7 +375,14 @@ function validateCourse(input) {
   const sections = input.sections.map((section) => String(section).trim());
   if (sections.some((section) => !section)) return "Every section needs a title.";
   if (new Set(sections).size !== sections.length) return "Each section in a course needs a different title.";
-  return validateLessons(input.lessonContent ?? [], sections);
+  const lessonProblem = validateLessons(input.lessonContent ?? [], sections);
+  if (lessonProblem) return lessonProblem;
+  if (input.finalExam != null) {
+    const examProblem = validateQuiz(input.finalExam, "final");
+    if (examProblem) return `Final exam: ${examProblem}`;
+    return passMarkProblem(input.finalExam.passMark);
+  }
+  return null;
 }
 
 function sendFindError(res, error) {
@@ -361,7 +412,43 @@ async function findCourse(id, client = supabase) {
   return toCourse(data);
 }
 
+// Error codes for assessment tables that do not exist because
+// supabase/004_assessments.sql was never run.
+const MISSING_TABLE_CODES = ["PGRST200", "PGRST205", "42P01"];
+
+const ASSESSMENTS_NOT_SET_UP =
+  "Quizzes and final exams are not set up in the database yet. Run supabase/004_assessments.sql in the Supabase SQL editor, then save again.";
+
+// Checked before a course with quizzes changes anything. Any other read error
+// is left for the save itself to report.
+async function assessmentTablesMissing(input) {
+  const sendsAssessments = Boolean(input.finalExam) || (input.lessonContent || []).some((lesson) => lesson.quiz);
+  if (!sendsAssessments) return false;
+  const { error } = await supabaseAdmin.from("quizzes").select("id").limit(1);
+  return MISSING_TABLE_CODES.includes(error?.code);
+}
+
+// Reads courses the way staff see them, with quizzes and answer keys. Until
+// the assessment tables exist, staff still get their courses without quizzes.
+async function readStaffCourses(narrow) {
+  const run = (select) => narrow(supabaseAdmin.from("courses").select(select));
+  const result = await run(staffCourseSelect);
+  return MISSING_TABLE_CODES.includes(result.error?.code) ? run(courseSelect) : result;
+}
+
+async function findStaffCourse(id) {
+  const { data, error } = await readStaffCourses((query) => query.eq("id", id).single());
+  if (error) throw error;
+  return toCourse(data);
+}
+
+function lessonKey(lesson) {
+  return JSON.stringify([String(lesson.section).trim(), String(lesson.title).trim()]);
+}
+
+// Returns the new id of every lesson, keyed by its section and title.
 async function saveChildren(courseId, input) {
+  const lessonIds = new Map();
   const objectives = (input.objectives || [])
     .map((objective, position) => ({ course_id: courseId, objective: String(objective).trim(), position }))
     .filter((item) => item.objective);
@@ -397,6 +484,7 @@ async function saveChildren(courseId, input) {
     if (lessonsError) throw lessonsError;
 
     for (const savedLesson of savedLessons) {
+      lessonIds.set(lessonKey({ section: title, title: savedLesson.title }), savedLesson.id);
       const sourceLesson = sectionLessons.find((lesson) => String(lesson.title).trim() === savedLesson.title);
       const resources = [
         ...(sourceLesson?.slides || []).map((resource, position) => ({
@@ -420,95 +508,24 @@ async function saveChildren(courseId, input) {
       }
     }
   }
+  return lessonIds;
 }
 
-function lessonKeyOf(section, title) {
-  return JSON.stringify([String(section).trim(), String(title).trim()]);
-}
-
-// Lists the lessons of a course by [section, title], the same key lesson
-// progress uses, along with each lesson's database id.
-async function readLessonIds(courseId) {
-  const lessons = new Map();
-  const { data: sections, error } = await supabaseAdmin
-    .from("course_sections")
-    .select("id, title")
-    .eq("course_id", courseId);
-  if (error) throw error;
-  for (const section of sections || []) {
-    const { data, error: lessonsError } = await supabaseAdmin
-      .from("course_lessons")
-      .select("id, title")
-      .eq("section_id", section.id);
-    if (lessonsError) throw lessonsError;
-    for (const lesson of data || []) lessons.set(lessonKeyOf(section.title, lesson.title), lesson.id);
-  }
-  return lessons;
-}
-
-const MISSING_TABLE_CODES = new Set(["PGRST205", "42P01"]);
-
-// Saving a course replaces its lessons, and the database removes a lesson's
-// quiz link along with the lesson. This reads the links first (quiz id to
-// lesson key) so they can be put back once the new lessons exist.
-async function readLessonQuizLinks(courseId) {
-  const links = new Map();
-  for (const [key, lessonId] of await readLessonIds(courseId)) {
-    const { data, error } = await supabaseAdmin
-      .from("lesson_assessments")
-      .select("quiz_id")
-      .eq("lesson_id", lessonId);
-    // Before supabase/004_assessments.sql is run there are no quizzes to keep.
-    if (MISSING_TABLE_CODES.has(error?.code)) return links;
-    if (error) throw error;
-    if (data?.length) links.set(data[0].quiz_id, key);
-  }
-  return links;
-}
-
-// A lesson that comes back with a `quizId` this course already had keeps that
-// quiz even if it was renamed. Otherwise a quiz goes back to the lesson with
-// the same section and title. A quiz whose lesson was removed stays in the
-// database with its attempts but is no longer shown.
-async function reattachLessonQuizzes(courseId, input, links) {
-  if (!links.size) return;
-  const placed = new Map();
-  const used = new Set();
-  for (const lesson of input.lessonContent || []) {
-    const key = lessonKeyOf(lesson.section, lesson.title);
-    if (typeof lesson.quizId === "string" && links.has(lesson.quizId) && !used.has(lesson.quizId) && !placed.has(key)) {
-      placed.set(key, lesson.quizId);
-      used.add(lesson.quizId);
-    }
-  }
-  for (const [quizId, key] of links) {
-    if (used.has(quizId) || placed.has(key)) continue;
-    placed.set(key, quizId);
-    used.add(quizId);
-  }
-  const lessonIds = await readLessonIds(courseId);
-  const rows = [...placed]
-    .filter(([key]) => lessonIds.has(key))
-    .map(([key, quizId]) => ({ lesson_id: lessonIds.get(key), quiz_id: quizId }));
-  if (!rows.length) return;
-  const { error } = await supabaseAdmin.from("lesson_assessments").insert(rows);
-  if (error) throw error;
-}
-
-async function replaceChildren(courseId, input, quizLinks = new Map()) {
+async function replaceChildren(courseId, input) {
   const { error: objectivesError } = await supabaseAdmin.from("course_objectives").delete().eq("course_id", courseId);
   if (objectivesError) throw objectivesError;
   const { error: sectionsError } = await supabaseAdmin.from("course_sections").delete().eq("course_id", courseId);
   if (sectionsError) throw sectionsError;
-  await saveChildren(courseId, input);
-  await reattachLessonQuizzes(courseId, input, quizLinks);
+  return saveChildren(courseId, input);
 }
 
-async function restoreCourse(courseId, previous, quizLinks) {
+async function restoreCourse(courseId, previous, userId) {
   try {
     const { error } = await supabaseAdmin.from("courses").update(toCourseRow(previous)).eq("id", courseId);
     if (error) throw error;
-    await replaceChildren(courseId, previous, quizLinks);
+    const lessonIds = await replaceChildren(courseId, previous);
+    // Quizzes are only deleted after a save works, so the previous ones still exist.
+    await saveCourseAssessments(courseId, previous, previous, lessonIds, userId);
     return true;
   } catch (error) {
     console.error(`Unable to restore course ${courseId}.`, error);
@@ -518,21 +535,24 @@ async function restoreCourse(courseId, previous, quizLinks) {
 
 // Agreed assessment design: lesson quizzes have 10 to 25 questions and unlimited
 // retakes; final exams have 50 questions, an 80% default pass mark and three attempts.
+const DEFAULT_PASS_MARK = 80;
+const FINAL_EXAM_ATTEMPTS = 3;
 const QUESTION_LIMITS = {
   lesson: { min: 10, max: 25, message: "A lesson quiz needs 10 to 25 questions." },
   final: { min: 50, max: 50, message: "A final exam needs exactly 50 questions." },
 };
-const DEFAULT_PASS_MARK = 80;
-const FINAL_EXAM_ATTEMPTS = 3;
 
 function questionCountError(type, count) {
   const limits = QUESTION_LIMITS[type];
   return limits && (count < limits.min || count > limits.max) ? limits.message : null;
 }
 
-function readPassMark(body) {
-  const passMark = Number(body?.passMark ?? DEFAULT_PASS_MARK);
-  return Number.isFinite(passMark) && passMark >= 0 && passMark <= 100 ? passMark : null;
+// A pass mark left out uses the default. A pass mark of 0 would pass everyone.
+function passMarkProblem(passMark) {
+  if (passMark === undefined) return null;
+  return Number.isInteger(passMark) && passMark >= 1 && passMark <= 100
+    ? null
+    : "Pass mark must be a whole percentage from 1 to 100.";
 }
 
 // `type` is "lesson" or "final" when a whole assessment is saved, so the
@@ -617,72 +637,69 @@ async function readQuiz(quizId, includeAnswers = false) {
   return publicQuiz(quiz, questions || [], choices, includeAnswers);
 }
 
-async function idsWhere(table, column, value) {
-  const { data, error } = await supabaseAdmin.from(table).select("id").eq(column, value);
-  if (error) throw error;
-  return new Set((data || []).map((row) => row.id));
-}
-
-// Questions and choices that come back with their id are updated in place, so
-// earlier attempts still point at the same questions and choices. New ones are
-// added and any that were left out are removed.
-async function saveChoices(questionId, choices) {
-  const existing = await idsWhere("answer_choices", "question_id", questionId);
-  const kept = new Set();
-  for (const [position, choice] of choices.entries()) {
-    const row = { choice_text: choice.text.trim(), is_correct: choice.isCorrect === true, position };
-    if (typeof choice.id === "string" && existing.has(choice.id) && !kept.has(choice.id)) {
-      const { error } = await supabaseAdmin.from("answer_choices").update(row).eq("id", choice.id);
+// Saves rows in order: a row sent with the id of one of `table`'s rows under
+// `parent` is updated in place, any other row is added, and rows no longer
+// sent are deleted. Keeping ids means learners' saved answers still point at
+// the questions and choices they answered. Returns the saved ids in order.
+async function saveOrderedRows(table, [parentColumn, parentId], rows) {
+  const { data: existing, error: readError } = await supabaseAdmin
+    .from(table)
+    .select("id")
+    .eq(parentColumn, parentId);
+  if (readError) throw readError;
+  const unused = new Set((existing || []).map((row) => row.id));
+  const savedIds = [];
+  for (const [position, { id, fields }] of rows.entries()) {
+    if (unused.delete(id)) {
+      const { error } = await supabaseAdmin.from(table).update({ ...fields, position }).eq("id", id);
       if (error) throw error;
-      kept.add(choice.id);
-    } else {
-      const { error } = await supabaseAdmin.from("answer_choices").insert({ ...row, question_id: questionId });
-      if (error) throw error;
-    }
-  }
-  for (const id of existing) {
-    if (kept.has(id)) continue;
-    const { error } = await supabaseAdmin.from("answer_choices").delete().eq("id", id);
-    if (error) throw error;
-  }
-}
-
-async function saveQuizQuestions(quizId, questions) {
-  const existing = await idsWhere("questions", "quiz_id", quizId);
-  const kept = new Set();
-  for (const [position, question] of questions.entries()) {
-    const row = {
-      question_text: question.questionText.trim(),
-      explanation: question.explanation?.trim() || null,
-      position,
-    };
-    let questionId = question.id;
-    if (typeof questionId === "string" && existing.has(questionId) && !kept.has(questionId)) {
-      const { error } = await supabaseAdmin.from("questions").update(row).eq("id", questionId);
-      if (error) throw error;
+      savedIds.push(id);
     } else {
       const { data, error } = await supabaseAdmin
-        .from("questions")
-        .insert({ ...row, quiz_id: quizId })
+        .from(table)
+        .insert({ ...fields, [parentColumn]: parentId, position })
         .select("id")
         .single();
       if (error) throw error;
-      questionId = data.id;
+      savedIds.push(data.id);
     }
-    kept.add(questionId);
-    await saveChoices(questionId, question.choices);
   }
-  for (const id of existing) {
-    if (kept.has(id)) continue;
-    const { error } = await supabaseAdmin.from("questions").delete().eq("id", id);
+  for (const id of unused) {
+    const { error } = await supabaseAdmin.from(table).delete().eq("id", id);
     if (error) throw error;
+  }
+  return savedIds;
+}
+
+async function saveQuizQuestions(quizId, questions) {
+  const questionIds = await saveOrderedRows("questions", ["quiz_id", quizId], questions.map((question) => ({
+    id: question.id,
+    fields: {
+      question_text: question.questionText.trim(),
+      explanation: question.explanation?.trim() || null,
+    },
+  })));
+  for (const [index, question] of questions.entries()) {
+    await saveOrderedRows("answer_choices", ["question_id", questionIds[index]], question.choices.map((choice) => ({
+      id: choice.id,
+      fields: { choice_text: choice.text.trim(), is_correct: choice.isCorrect === true },
+    })));
   }
 }
 
-async function createQuiz(input, userId) {
+async function updateQuiz(quizId, input, defaultTitle) {
+  const { error } = await supabaseAdmin
+    .from("quizzes")
+    .update({ title: input.title?.trim() || defaultTitle })
+    .eq("id", quizId);
+  if (error) throw error;
+  await saveQuizQuestions(quizId, input.questions);
+}
+
+async function createQuiz(input, userId, defaultTitle = "Assessment") {
   const { data, error } = await supabaseAdmin
     .from("quizzes")
-    .insert({ title: input.title?.trim() || "Assessment", created_by: userId })
+    .insert({ title: input.title?.trim() || defaultTitle, created_by: userId })
     .select("id")
     .single();
   if (error) throw error;
@@ -692,6 +709,85 @@ async function createQuiz(input, userId) {
   } catch (error) {
     await supabaseAdmin.from("quizzes").delete().eq("id", data.id);
     throw error;
+  }
+}
+
+// Saves the lesson quizzes and final exam sent with a course. Saving a course
+// recreates its lessons, which drops their quiz links, so each quiz is linked
+// again to its lesson's new row and edited in place: its id, unchanged
+// questions, and learners' attempts all stay. `current` is the course as
+// stored before this save (null for a new course), and `lessonIds` are the
+// newly saved lessons, keyed by section and title. A lesson or course sent
+// with no quiz details at all keeps what it had; null removes it.
+// Returns the quizzes the course no longer uses, to delete once the save works.
+async function saveCourseAssessments(courseId, input, current, lessonIds, userId) {
+  const currentQuizIds = new Map((current?.lessonContent || [])
+    .filter((lesson) => lesson.quiz)
+    .map((lesson) => [lessonKey(lesson), lesson.quiz.id]));
+  const unused = new Set(currentQuizIds.values());
+  const created = [];
+  const saveQuiz = async (quiz, defaultTitle) => {
+    // Only this course's own quizzes can be edited through it.
+    if (unused.delete(quiz.id)) {
+      await updateQuiz(quiz.id, quiz, defaultTitle);
+      return quiz.id;
+    }
+    const quizId = await createQuiz(quiz, userId, defaultTitle);
+    created.push(quizId);
+    return quizId;
+  };
+
+  try {
+    for (const lesson of input.lessonContent || []) {
+      let quizId = null;
+      if (lesson.quiz) {
+        quizId = await saveQuiz(lesson.quiz, "Lesson quiz");
+      } else if (lesson.quiz === undefined) {
+        const kept = currentQuizIds.get(lessonKey(lesson));
+        if (unused.delete(kept)) quizId = kept;
+      }
+      if (!quizId) continue;
+      const { error } = await supabaseAdmin
+        .from("lesson_assessments")
+        .insert({ lesson_id: lessonIds.get(lessonKey(lesson)), quiz_id: quizId });
+      if (error) throw error;
+    }
+
+    const currentExam = current?.finalExam;
+    if (input.finalExam === null && currentExam) {
+      // Deleting the exam's quiz also deletes the exam.
+      unused.add(currentExam.id);
+    } else if (input.finalExam) {
+      const passMark = Number(input.finalExam.passMark ?? DEFAULT_PASS_MARK);
+      if (currentExam) {
+        const { error } = await supabaseAdmin
+          .from("final_exams")
+          .update({ pass_mark: passMark })
+          .eq("course_id", courseId);
+        if (error) throw error;
+        await updateQuiz(currentExam.id, input.finalExam, "Final exam");
+      } else {
+        const quizId = await createQuiz(input.finalExam, userId, "Final exam");
+        created.push(quizId);
+        const { error } = await supabaseAdmin
+          .from("final_exams")
+          .insert({ course_id: courseId, quiz_id: quizId, pass_mark: passMark });
+        if (error) throw error;
+      }
+    }
+  } catch (error) {
+    for (const quizId of created) await supabaseAdmin.from("quizzes").delete().eq("id", quizId);
+    throw error;
+  }
+  return [...unused];
+}
+
+// Removing a quiz also removes learners' attempts at it. A quiz that cannot be
+// removed is left unlinked, which learners never see, so the save still stands.
+async function removeQuizzes(quizIds) {
+  for (const quizId of quizIds) {
+    const { error } = await supabaseAdmin.from("quizzes").delete().eq("id", quizId);
+    if (error) console.error(`Unable to remove quiz ${quizId}.`, error);
   }
 }
 
@@ -746,14 +842,10 @@ async function createLessonAssessment(req, res) {
 
 async function createFinalExam(req, res) {
   if (!requireSupabaseAdmin(res)) return;
-  const validationError = validateQuiz(req.body, "final");
-  const passMark = readPassMark(req.body);
+  const validationError = validateQuiz(req.body, "final") || passMarkProblem(req.body?.passMark);
+  const passMark = Number(req.body?.passMark ?? DEFAULT_PASS_MARK);
   if (validationError) {
     res.status(400).json({ error: validationError });
-    return;
-  }
-  if (passMark === null) {
-    res.status(400).json({ error: "Pass mark must be a percentage from 0 to 100." });
     return;
   }
   try {
@@ -814,6 +906,10 @@ app.post("/api/courses", requireStaff, async (req, res) => {
     res.status(400).json({ error: validationError });
     return;
   }
+  if (await assessmentTablesMissing(req.body)) {
+    res.status(503).json({ error: ASSESSMENTS_NOT_SET_UP });
+    return;
+  }
   const input = req.body;
   const { data, error } = await supabaseAdmin
     .from("courses")
@@ -825,8 +921,9 @@ app.post("/api/courses", requireStaff, async (req, res) => {
     return;
   }
   try {
-    await saveChildren(data.id, input);
-    res.status(201).json({ course: await findCourse(data.id, supabaseAdmin) });
+    const lessonIds = await saveChildren(data.id, input);
+    await saveCourseAssessments(data.id, input, null, lessonIds, req.user.id);
+    res.status(201).json({ course: await findStaffCourse(data.id) });
   } catch (childError) {
     await supabaseAdmin.from("courses").delete().eq("id", data.id);
     res.status(500).json({ error: getErrorMessage(childError) });
@@ -840,19 +937,16 @@ app.put("/api/courses/:id", requireStaff, async (req, res) => {
     res.status(400).json({ error: validationError });
     return;
   }
+  if (await assessmentTablesMissing(req.body)) {
+    res.status(503).json({ error: ASSESSMENTS_NOT_SET_UP });
+    return;
+  }
   const input = req.body;
   let previous;
   try {
-    previous = await findCourse(req.params.id, supabaseAdmin);
+    previous = await findStaffCourse(req.params.id);
   } catch (findError) {
     sendFindError(res, findError);
-    return;
-  }
-  let quizLinks;
-  try {
-    quizLinks = await readLessonQuizLinks(req.params.id);
-  } catch (linksError) {
-    res.status(500).json({ error: getErrorMessage(linksError) });
     return;
   }
   const { error } = await supabaseAdmin
@@ -864,11 +958,13 @@ app.put("/api/courses/:id", requireStaff, async (req, res) => {
     return;
   }
   try {
-    await replaceChildren(req.params.id, input, quizLinks);
-    res.json({ course: await findCourse(req.params.id, supabaseAdmin) });
+    const lessonIds = await replaceChildren(req.params.id, input);
+    const unusedQuizIds = await saveCourseAssessments(req.params.id, input, previous, lessonIds, req.user.id);
+    await removeQuizzes(unusedQuizIds);
+    res.json({ course: await findStaffCourse(req.params.id) });
   } catch (childError) {
     console.error(`Unable to update course ${req.params.id}.`, childError);
-    const restored = await restoreCourse(req.params.id, previous, quizLinks);
+    const restored = await restoreCourse(req.params.id, previous, req.user.id);
     res.status(500).json({
       error: restored
         ? "The course could not be updated, so the previous version was kept. Please try again."
@@ -888,7 +984,7 @@ app.delete("/api/courses/:id", requireStaff, async (req, res) => {
 });
 
 // Members only reach assessments in published courses. Staff also see drafts,
-// and get the answer key and explanations so the course builder can edit them.
+// and get the answer key and explanations so they can check them.
 async function courseStatusForLesson(lessonId) {
   const lesson = await readSingleReference("course_lessons", "id", lessonId);
   const section = await readSingleReference("course_sections", "id", lesson.section_id);
@@ -940,14 +1036,10 @@ app.post("/api/courses/:courseId/final-exam", requireStaff, createFinalExam);
 
 app.put("/api/courses/:courseId/final-exam", requireStaff, async (req, res) => {
   if (!requireSupabaseAdmin(res)) return;
-  const validationError = validateQuiz(req.body, "final");
-  const passMark = readPassMark(req.body);
+  const validationError = validateQuiz(req.body, "final") || passMarkProblem(req.body?.passMark);
+  const passMark = Number(req.body?.passMark ?? DEFAULT_PASS_MARK);
   if (validationError) {
     res.status(400).json({ error: validationError });
-    return;
-  }
-  if (passMark === null) {
-    res.status(400).json({ error: "Pass mark must be a percentage from 0 to 100." });
     return;
   }
   try {
@@ -1007,6 +1099,12 @@ app.put("/api/quizzes/:quizId/questions/reorder", requireStaff, async (req, res)
   }
 });
 
+async function countQuestions(quizId) {
+  const { data, error } = await supabaseAdmin.from("questions").select("id").eq("quiz_id", quizId);
+  if (error) throw error;
+  return (data || []).length;
+}
+
 app.post("/api/quizzes/:quizId/questions", requireStaff, async (req, res) => {
   if (!requireSupabaseAdmin(res)) return;
   const validationError = validateQuiz({ questions: [req.body] });
@@ -1023,8 +1121,7 @@ app.post("/api/quizzes/:quizId/questions", requireStaff, async (req, res) => {
       .limit(1);
     if (existingError) throw existingError;
     const { type } = await assessmentForQuiz(req.params.quizId);
-    const count = (await idsWhere("questions", "quiz_id", req.params.quizId)).size;
-    if (count + 1 > QUESTION_LIMITS[type].max) {
+    if ((await countQuestions(req.params.quizId)) + 1 > QUESTION_LIMITS[type].max) {
       res.status(400).json({ error: QUESTION_LIMITS[type].message });
       return;
     }
@@ -1077,7 +1174,10 @@ app.put("/api/questions/:questionId", requireStaff, async (req, res) => {
       })
       .eq("id", req.params.questionId);
     if (updateError) throw updateError;
-    await saveChoices(req.params.questionId, req.body.choices);
+    await saveOrderedRows("answer_choices", ["question_id", req.params.questionId], req.body.choices.map((choice) => ({
+      id: choice.id,
+      fields: { choice_text: choice.text.trim(), is_correct: choice.isCorrect === true },
+    })));
     res.json({ assessment: await readQuiz(question.quiz_id, true) });
   } catch (error) {
     sendAssessmentError(res, error);
@@ -1089,8 +1189,7 @@ app.delete("/api/questions/:questionId", requireStaff, async (req, res) => {
   try {
     const question = await readSingleReference("questions", "id", req.params.questionId);
     const { type } = await assessmentForQuiz(question.quiz_id);
-    const count = (await idsWhere("questions", "quiz_id", question.quiz_id)).size;
-    if (count - 1 < QUESTION_LIMITS[type].min) {
+    if ((await countQuestions(question.quiz_id)) - 1 < QUESTION_LIMITS[type].min) {
       res.status(400).json({ error: QUESTION_LIMITS[type].message });
       return;
     }
@@ -1283,10 +1382,7 @@ async function listAllUsers() {
 // Every course, drafts included, with who created it and when it last changed.
 app.get("/api/staff/courses", requireStaff, async (req, res) => {
   if (!requireSupabaseAdmin(res)) return;
-  const { data, error } = await supabaseAdmin
-    .from("courses")
-    .select(courseSelect)
-    .order("created_at", { ascending: true });
+  const { data, error } = await readStaffCourses((query) => query.order("created_at", { ascending: true }));
   if (error) {
     res.status(500).json({ error: error.message });
     return;
