@@ -983,7 +983,47 @@ function CourseDetails({
   tracking?: ProgressRow[];
 }) {
   const [open, setOpen] = useState(0);
+  const [examAnswers, setExamAnswers] = useState<number[]>([]);
+  const [examResult, setExamResult] = useState<any>(null);
+  const [examBusy, setExamBusy] = useState(false);
+  const [examError, setExamError] = useState("");
+  const [attemptsUsed, setAttemptsUsed] = useState(0);
+  const [certificate, setCertificate] = useState<any>(null);
+  const [verifyCode, setVerifyCode] = useState("");
+  const [verifyResult, setVerifyResult] = useState<any>(null);
+  const exam = course.finalExam ?? [];
   const progress = tracking ? courseProgress(course, tracking) : undefined;
+  useEffect(() => {
+    if (!user || !course.id) return;
+    let active = true;
+    void (async () => {
+      const [attemptRows, certificateRows] = await Promise.all([
+        supabase.from("final_exam_attempts").select("id").eq("course_id", course.id),
+        supabase.from("certificates").select("certificate_id, issued_at").eq("course_id", course.id).maybeSingle(),
+      ]);
+      if (!active) return;
+      if (!attemptRows.error) setAttemptsUsed(attemptRows.data?.length ?? 0);
+      if (!certificateRows.error) setCertificate(certificateRows.data);
+    })();
+    return () => { active = false; };
+  }, [user?.id, course.id]);
+  const submitExam = async () => {
+    if (!course.id || examAnswers.length !== exam.length || examAnswers.some((answer) => answer < 0)) return;
+    setExamBusy(true); setExamError(""); setExamResult(null);
+    const { data, error } = await supabase.rpc("submit_final_exam", {
+      p_course_id: course.id,
+      p_answers: examAnswers.map((selectedIndex) => ({ selectedIndex })),
+    });
+    setExamBusy(false);
+    if (error) { setExamError(error.message); return; }
+    setExamResult(data);
+    setAttemptsUsed(data.attemptsUsed);
+    if (data.certificate) setCertificate({ certificate_id: data.certificate.certificateId, issued_at: data.certificate.issuedAt });
+  };
+  const verifyCertificate = async () => {
+    const { data, error } = await supabase.rpc("verify_certificate", { p_certificate_id: verifyCode });
+    setVerifyResult(error ? { valid: false } : data);
+  };
   const doneKeys = new Set(
     (tracking ?? []).filter((row) => row.course_id === course.id).map((row) => row.lesson_key),
   );
@@ -1143,6 +1183,54 @@ function CourseDetails({
             {startButton}
           </aside>
         </section>
+        {exam.length > 0 && (
+          <section className="content-card" style={{ marginTop: 24 }}>
+            <h2>Final exam</h2>
+            {!user ? <p>Sign in to take the final exam after completing all course lessons.</p>
+              : !progress?.finished ? <p>Complete all {progress?.total ?? lessonCount(course)} course lessons to unlock the final exam.</p>
+              : certificate ? <div className="lesson-done"><span>Course complete · Certificate {certificate.certificate_id}</span><button className="btn outline" onClick={() => window.print()}>View / download certificate</button></div>
+              : attemptsUsed >= 3 ? <p>You have used all three attempts. The final exam is now closed.</p>
+              : <>
+                <p>Pass with 70% or higher. Attempts remaining: {3 - attemptsUsed}.</p>
+                {exam.map((question, questionIndex) => (
+                  <fieldset key={questionIndex} style={{ margin: "20px 0", border: "1px solid var(--line)", borderRadius: 10, padding: 16 }}>
+                    <legend><b>{questionIndex + 1}. {question.prompt}</b></legend>
+                    {question.options.map((option, optionIndex) => <label key={optionIndex} style={{ display: "block", padding: 8 }}><input type="radio" name={`exam-${course.id}-${questionIndex}`} checked={examAnswers[questionIndex] === optionIndex} onChange={() => setExamAnswers((current) => { const updated = [...current]; updated[questionIndex] = optionIndex; return updated; })} /> {option}</label>)}
+                  </fieldset>
+                ))}
+                {examError && <p role="alert">{examError}</p>}
+                {examResult && <p role="status">Score: {examResult.score}% · {examResult.passed ? "Passed" : "Not passed"}. Attempts remaining: {examResult.attemptsRemaining}.</p>}
+                <Button disabled={examBusy || examAnswers.length !== exam.length || examAnswers.some((answer) => answer < 0)} onClick={() => void submitExam()}>{examBusy ? "Submitting…" : "Submit final exam"}</Button>
+              </>}
+            {certificate && <div className="certificate-print">
+              <aside className="certificate-side">
+                <div className="certificate-brand"><span className="certificate-brand-mark" aria-hidden="true">✦</span><span><b>ELITE RC</b><small>COMMUNITY LEARNING HUB</small></span></div>
+                <div className="certificate-heading"><p>CERTIFICATE</p><h2>OF ACHIEVEMENT</h2></div>
+              </aside>
+              <div className="certificate-medal-wrap" aria-hidden="true"><i /><i /><div className="certificate-medal"><span>✦</span><b>AWARDED<br />WITH HONOUR</b></div></div>
+              <div className="certificate-main">
+                <div className="certificate-topline"><span>PROUDLY PRESENTED TO</span><span>COURSE COMPLETION</span></div>
+                <h3 className="certificate-recipient">{memberName(user!)}</h3>
+                <div className="certificate-rule"><i /></div>
+                <p className="certificate-intro">in recognition of successfully completing</p>
+                <h4 className="certificate-course">{course.title}</h4>
+                <p className="certificate-copy">and passing the final examination with distinction.</p>
+                <div className="certificate-bottom">
+                  <div><span>ISSUED</span><b>{new Date(certificate.issued_at).toLocaleDateString()}</b></div>
+                  <div className="certificate-signature"><i /><span>{course.instructor}</span><small>Course Instructor</small></div>
+                  <div className="certificate-id"><span>CERTIFICATE ID</span><b>{certificate.certificate_id}</b></div>
+                </div>
+                <button className="btn outline certificate-download" onClick={() => window.print()}>Download / print certificate</button>
+              </div>
+            </div>}
+          </section>
+        )}
+        {isStaff(user) && <section className="content-card" style={{ marginTop: 24 }}>
+          <h2>Verify a certificate</h2>
+          <p>Confirm a learner’s certificate using its unique identifier.</p>
+          <div style={{ display: "flex", gap: 8 }}><input aria-label="Certificate identifier" value={verifyCode} onChange={(event) => setVerifyCode(event.target.value)} placeholder="ELITE-…" /><Button onClick={() => void verifyCertificate()}>Verify</Button></div>
+          {verifyResult && <p role="status">{verifyResult.valid ? `Verified: ${verifyResult.learnerName} completed ${verifyResult.courseTitle} on ${new Date(verifyResult.issuedAt).toLocaleDateString()}.` : "No valid certificate was found for that identifier."}</p>}
+        </section>}
       </main>
     </>
   );
