@@ -30,7 +30,8 @@ const TABLE_RULES = {
     unique: ["course_id", "title"],
   },
   course_lessons: {
-    defaults: { position: 0, youtube_url: null },
+    // From supabase/007_lesson_blocks.sql.
+    defaults: { position: 0, youtube_url: null, blocks: [] },
     parent: ["section_id", "course_sections"],
     unique: ["section_id", "title"],
   },
@@ -40,6 +41,8 @@ const TABLE_RULES = {
   },
   // From supabase/003_lesson_progress.sql: deleting a course removes its progress.
   lesson_progress: { defaults: {}, parent: ["course_id", "courses"] },
+  // From supabase/008_block_templates.sql.
+  lesson_block_templates: { defaults: { description: "", fields: [], created_by: null }, parent: null, unique: ["name"] },
   quizzes: { defaults: { created_by: null }, parent: null },
   questions: { defaults: { explanation: null, position: 0 }, parent: ["quiz_id", "quizzes"] },
   answer_choices: { defaults: { is_correct: false, position: 0 }, parent: ["question_id", "questions"] },
@@ -118,9 +121,12 @@ export async function startFakeSupabase({ serviceKey }) {
   let users;
 
   let missingTables;
+  let missingColumns;
 
   const reset = () => {
     missingTables = new Set();
+    // "table.column" for columns whose setup SQL was never run.
+    missingColumns = new Set();
     db = Object.fromEntries(Object.keys(TABLE_RULES).map((table) => [table, []]));
     files = new Map();
     failures = new Set();
@@ -211,8 +217,16 @@ export async function startFakeSupabase({ serviceKey }) {
     }
     const matches = (row) => filters.every(([key, value]) => row[key] === value);
 
+    const absentColumns = [...missingColumns]
+      .map((name) => name.split("."))
+      .filter(([columnTable]) => columnTable === table || (table === "courses" && columnTable.startsWith("course_")))
+      .map(([, column]) => column);
+
     if (method === "GET") {
       const select = url.searchParams.get("select") || "*";
+      // What PostgREST answers when a select names a column that does not exist.
+      const absent = absentColumns.find((column) => select.split(/[\s,()]+/).includes(column));
+      if (absent) return databaseError(400, "42703", `column ${table}.${absent} does not exist`);
       // What PostgREST answers when a select embeds a table whose setup SQL was never run.
       const missingEmbed = [...missingTables].find((name) => select.includes(name));
       if (missingEmbed) {
@@ -221,7 +235,14 @@ export async function startFakeSupabase({ serviceKey }) {
       const rows = db[table]
         .filter(matches)
         .slice(offset, offset + limit)
-        .map((row) => (table === "courses" ? nestedCourse(row, select) : row));
+        .map((row) => {
+          if (table === "courses") return nestedCourse(row, select);
+          // Like PostgREST, a section can embed its lessons.
+          if (table === "course_sections" && select.includes("course_lessons")) {
+            return { ...row, course_lessons: db.course_lessons.filter((lesson) => lesson.section_id === row.id) };
+          }
+          return row;
+        });
       if (!String(headers.accept).includes("vnd.pgrst.object")) return { status: 200, body: rows };
       return rows.length === 1
         ? { status: 200, body: rows[0] }
@@ -233,6 +254,13 @@ export async function startFakeSupabase({ serviceKey }) {
       return method === "POST"
         ? databaseError(401, "42501", `new row violates row-level security policy for table "${table}"`)
         : { status: 204, body: null };
+    }
+
+    // What PostgREST answers when a write names a column that does not exist.
+    const written = [body].flat().filter(Boolean).flatMap((values) => Object.keys(values));
+    const absentWrite = absentColumns.find((column) => written.includes(column));
+    if (absentWrite) {
+      return databaseError(400, "PGRST204", `Could not find the '${absentWrite}' column of '${table}' in the schema cache`);
     }
 
     if (failures.delete(table)) {
@@ -403,6 +431,12 @@ export async function startFakeSupabase({ serviceKey }) {
     failNext: (target) => failures.add(target),
     // Acts as if a setup SQL file was never run on the project.
     dropTable: (table) => missingTables.add(table),
+    // Acts as if the SQL file that adds a column was never run, e.g. "course_lessons.blocks".
+    dropColumn: (name) => {
+      missingColumns.add(name);
+      const [table, column] = name.split(".");
+      for (const row of db[table]) delete row[column];
+    },
     // Signs someone in: the token then identifies them to Supabase Auth.
     addUser: (token, details) => {
       const user = authUser(details);

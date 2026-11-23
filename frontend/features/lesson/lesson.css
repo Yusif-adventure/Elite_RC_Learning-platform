@@ -1,0 +1,338 @@
+/* Lesson files and lesson blocks. Uses the tokens in index.css, full 1px
+   borders, 44px touch targets, and one column at 760px and below. */
+
+.file-resource {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.file-resource-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.file-resource-name {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: var(--navy);
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.file-resource-name b {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.file-resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lesson-resource .file-resource .btn,
+.file-resource .btn {
+  min-height: 44px;
+  padding: 0 14px;
+  color: var(--navy);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.file-resource-frame {
+  width: 100%;
+  height: min(75vh, 760px);
+  min-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.file-resource-note,
+.lesson-resource .file-resource-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lesson-resource .file-resource-note a,
+.file-resource-note a {
+  color: var(--blue);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+@media (max-width: 760px) {
+  .file-resource-actions,
+  .file-resource-actions .btn {
+    width: 100%;
+  }
+
+  .file-resource-actions .btn {
+    flex: 1 1 0;
+  }
+
+  .file-resource-frame {
+    min-height: 360px;
+  }
+}
+
+/* Lesson blocks */
+
+.lesson-blocks {
+  display: grid;
+  gap: 22px;
+}
+
+.lesson-block {
+  min-width: 0;
+  margin: 0;
+}
+
+.lesson-image img {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.lesson-image figcaption {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.lesson-youtube {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--navy);
+}
+
+.lesson-youtube iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.lesson-video video {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  border-radius: 10px;
+  background: var(--navy);
+}
+
+.lesson-html iframe {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+/* Arrange the lines */
+
+.arrange {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(160deg, var(--sky), #fff 60%);
+}
+
+.arrange-head h3 {
+  margin: 6px 0 4px;
+  color: var(--navy);
+  font-size: 19px;
+}
+
+.arrange-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.arrange-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border: 1px solid var(--blue);
+  border-radius: 999px;
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transform: rotate(-2deg);
+}
+
+.arrange-lines {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.arrange-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.arrange-line[draggable="true"] {
+  cursor: grab;
+}
+
+.arrange-line.is-dragging {
+  opacity: 0.5;
+}
+
+.arrange-line.is-selected {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(19, 113, 232, 0.18);
+}
+
+.arrange-line.is-right {
+  border-color: var(--green);
+  background: #effaf6;
+}
+
+.arrange-line.is-wrong {
+  border-color: var(--red);
+  background: #fdf1f2;
+}
+
+.arrange-code {
+  min-height: 44px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--navy);
+  text-align: left;
+}
+
+.arrange-code:disabled {
+  cursor: default;
+}
+
+.arrange-code code {
+  font-family: ui-monospace, "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
+  font-size: 14px;
+  white-space: pre;
+}
+
+.arrange-mark {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.is-right .arrange-mark {
+  color: var(--green);
+}
+
+.is-wrong .arrange-mark {
+  color: var(--red);
+}
+
+.arrange-move {
+  display: flex;
+  gap: 4px;
+}
+
+.arrange-move button {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--navy);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.arrange-move button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.arrange-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.arrange-result {
+  min-height: 1.4em;
+  margin: 0;
+  color: var(--navy);
+  font-weight: 600;
+}
+
+.arrange-result.is-solved {
+  color: var(--green);
+  animation: arrange-pop 0.4s ease;
+}
+
+@keyframes arrange-pop {
+  0% { transform: scale(0.96); }
+  60% { transform: scale(1.03); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arrange-result.is-solved {
+    animation: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .arrange {
+    padding: 14px;
+  }
+
+  .arrange-line {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .arrange-mark {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding: 0 10px 6px;
+  }
+
+  .arrange-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  .arrange-code code {
+    font-size: 13px;
+  }
+}

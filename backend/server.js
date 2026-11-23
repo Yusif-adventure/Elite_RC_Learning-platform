@@ -64,7 +64,8 @@ app.use(cors({
     callback(new Error("Not allowed by CORS."));
   },
 }));
-app.use(express.json({ limit: "1mb" }));
+// Courses carry their lesson blocks, so a whole course can be a few megabytes.
+app.use(express.json({ limit: "5mb" }));
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -117,6 +118,18 @@ const uploadKinds = {
       ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     },
   },
+  "lesson-image": {
+    label: "Lesson image",
+    bucket: "lesson-resources",
+    maxBytes: 10 * MEGABYTE,
+    types: imageTypes,
+  },
+  "lesson-pdf": {
+    label: "Lesson PDF",
+    bucket: "lesson-resources",
+    maxBytes: 20 * MEGABYTE,
+    types: { ".pdf": "application/pdf" },
+  },
   video: {
     label: "Video preview",
     bucket: "lesson-resources",
@@ -135,7 +148,7 @@ const courseSelect = `
   course_sections (
     id, title, position,
     course_lessons (
-      id, title, position, youtube_url,
+      id, title, position, youtube_url, blocks,
       lesson_resources (id, resource_type, name, url, storage_path, mime_type, size_bytes, position)
     )
   )
@@ -155,7 +168,7 @@ const staffCourseSelect = `
   course_sections (
     id, title, position,
     course_lessons (
-      id, title, position, youtube_url,
+      id, title, position, youtube_url, blocks,
       lesson_resources (id, resource_type, name, url, storage_path, mime_type, size_bytes, position),
       lesson_assessments (quizzes (${quizSelect}))
     )
@@ -268,8 +281,8 @@ function toCourse(row) {
           .sort((a, b) => a.position - b.position);
         const quiz = embeddedOne(lesson.lesson_assessments)?.quizzes;
         return {
-          // Changes each time the course is saved. Learner pages use it to
-          // load the lesson's quiz.
+          // Stays the same when the course is saved. Learner pages use it to
+          // load the lesson's quiz, and the builder sends it back.
           id: lesson.id,
           title: lesson.title,
           section: section.title,
@@ -282,6 +295,8 @@ function toCourse(row) {
                 .map(({ name, url }) => ({ name, url }))[0]
             : undefined,
           youtubeUrl: lesson.youtube_url || undefined,
+          // Left out for lessons without blocks, so they read as they always have.
+          ...(Array.isArray(lesson.blocks) && lesson.blocks.length ? { blocks: lesson.blocks } : {}),
           ...(quiz ? { quiz: savedQuiz(quiz) } : {}),
         };
       }),
@@ -333,6 +348,178 @@ function isWebLink(value) {
   }
 }
 
+// Lesson blocks: the pieces an instructor stacks to build a lesson. They are
+// stored with the lesson (supabase/007_lesson_blocks.sql). Only the fields
+// each type needs are kept.
+const MAX_BLOCKS_PER_LESSON = 60;
+const MAX_ARRANGE_LINES = 40;
+const BLOCK_YOUTUBE_LINK = /^https?:\/\/(www\.|m\.)?(youtube\.com|youtu\.be|youtube-nocookie\.com)\/\S+$/i;
+
+function textOf(value, max) {
+  return typeof value === "string" && value.length <= max ? value : null;
+}
+
+function optionalText(value, max) {
+  return value === undefined || value === null || textOf(value, max) !== null;
+}
+
+// Placeholders in template HTML look like {{name}}.
+const TEMPLATE_FIELD_KEY = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+const MAX_TEMPLATE_FIELDS = 20;
+
+function templateFieldsProblem(fields) {
+  if (!Array.isArray(fields)) return "fields must be a list";
+  if (fields.length > MAX_TEMPLATE_FIELDS) return `can have up to ${MAX_TEMPLATE_FIELDS} fields`;
+  const keys = new Set();
+  for (const field of fields) {
+    if (!field || typeof field !== "object" || !TEMPLATE_FIELD_KEY.test(String(field.key || ""))) {
+      return "has a field whose name is not letters, numbers and _";
+    }
+    if (keys.has(field.key)) return `has the field "${field.key}" twice`;
+    keys.add(field.key);
+    if (!textOf(field.label, 80)?.trim()) return `field "${field.key}" needs a label of up to 80 characters`;
+  }
+  return null;
+}
+
+function cleanTemplateFields(fields) {
+  return fields.map(({ key, label }) => ({ key, label: label.trim() }));
+}
+
+const BLOCK_RULES = {
+  text: {
+    problem: (block) => (textOf(block.text, 20000)?.trim() ? null : "needs some text, up to 20,000 characters"),
+    keep: ({ text }) => ({ text }),
+  },
+  image: {
+    problem: (block) => {
+      if (!isWebLink(block.url)) return "needs a picture";
+      if (!textOf(block.alt, 300)?.trim()) return "needs a short description of the picture, for learners who cannot see it";
+      return optionalText(block.caption, 300) ? null : "caption must be 300 characters or fewer";
+    },
+    keep: ({ url, alt, caption }) => ({ url, alt, ...(caption ? { caption } : {}) }),
+  },
+  youtube: {
+    problem: (block) => {
+      if (!BLOCK_YOUTUBE_LINK.test(String(block.url || ""))) return "needs a full YouTube link";
+      return optionalText(block.title, 200) ? null : "title must be 200 characters or fewer";
+    },
+    keep: ({ url, title }) => ({ url, ...(title ? { title } : {}) }),
+  },
+  pdf: {
+    problem: (block) => (isWebLink(block.url) && textOf(block.name, 300)?.trim() ? null : "needs a PDF file"),
+    keep: ({ url, name }) => ({ url, name }),
+  },
+  video: {
+    problem: (block) => (isWebLink(block.url) && textOf(block.name, 300)?.trim() ? null : "needs a video file"),
+    keep: ({ url, name }) => ({ url, name }),
+  },
+  html: {
+    problem: (block) => {
+      if (!textOf(block.html, 100000)?.trim()) return "needs some HTML, up to 100,000 characters";
+      return optionalText(block.title, 200) ? null : "title must be 200 characters or fewer";
+    },
+    keep: ({ html, title }) => ({ html, ...(title ? { title } : {}) }),
+  },
+  template: {
+    problem: (block) => {
+      if (!textOf(block.html, 100000)?.trim()) return "needs the template's HTML";
+      if (!optionalText(block.templateId, 64)) return "has a template id that is too long";
+      if (!textOf(block.templateName, 80)?.trim()) return "needs the template's name";
+      const fieldsProblem = templateFieldsProblem(block.fields);
+      if (fieldsProblem) return fieldsProblem;
+      const values = block.values ?? {};
+      if (typeof values !== "object" || Array.isArray(values)) return "values must be an object";
+      const keys = new Set(block.fields.map((field) => field.key));
+      for (const [key, value] of Object.entries(values)) {
+        if (!keys.has(key)) return `has a value for "${key}", which is not one of its fields`;
+        if (textOf(value, 5000) === null) return `value for "${key}" must be text of up to 5,000 characters`;
+      }
+      return null;
+    },
+    keep: ({ html, templateId, templateName, fields, values }) => ({
+      html,
+      ...(templateId ? { templateId } : {}),
+      templateName: templateName.trim(),
+      fields: cleanTemplateFields(fields),
+      values: Object.fromEntries(
+        cleanTemplateFields(fields).map(({ key }) => [key, typeof values?.[key] === "string" ? values[key] : ""]),
+      ),
+    }),
+  },
+  arrange: {
+    problem: (block) => {
+      const code = textOf(block.code, 5000);
+      if (code === null) return "code must be 5,000 characters or fewer";
+      const lines = code.split(/\r?\n/).filter((line) => line.trim());
+      if (lines.length < 2) return "needs at least 2 lines of code to arrange";
+      if (lines.length > MAX_ARRANGE_LINES) return `can have up to ${MAX_ARRANGE_LINES} lines of code`;
+      if (!optionalText(block.title, 200)) return "title must be 200 characters or fewer";
+      return optionalText(block.instructions, 2000) ? null : "instructions must be 2,000 characters or fewer";
+    },
+    keep: ({ code, title, instructions }) => ({
+      code,
+      ...(title ? { title } : {}),
+      ...(instructions ? { instructions } : {}),
+    }),
+  },
+};
+
+function blocksProblem(blocks) {
+  if (blocks === undefined) return null;
+  if (!Array.isArray(blocks)) return "blocks must be a list";
+  if (blocks.length > MAX_BLOCKS_PER_LESSON) return `can have up to ${MAX_BLOCKS_PER_LESSON} blocks`;
+  const ids = new Set();
+  for (const [index, block] of blocks.entries()) {
+    const where = `block ${index + 1}`;
+    if (!block || typeof block !== "object" || Array.isArray(block)) return `${where} is not a block`;
+    if (!textOf(block.id, 64)?.trim()) return `${where} needs an id`;
+    if (ids.has(block.id)) return `${where} has the same id as another block`;
+    ids.add(block.id);
+    const rules = Object.hasOwn(BLOCK_RULES, block.type) ? BLOCK_RULES[block.type] : null;
+    if (!rules) return `${where} has an unknown type`;
+    const problem = rules.problem(block);
+    if (problem) return `${where} (${block.type}) ${problem}`;
+  }
+  return null;
+}
+
+function cleanBlocks(blocks) {
+  return (blocks || []).map((block) => ({ id: block.id, type: block.type, ...BLOCK_RULES[block.type].keep(block) }));
+}
+
+// Error codes for a column that does not exist because a setup SQL file was never run.
+const MISSING_COLUMN_CODES = ["42703", "PGRST204"];
+
+const BLOCKS_NOT_SET_UP =
+  "Lesson blocks are not set up in the database yet. Run supabase/007_lesson_blocks.sql in the Supabase SQL editor, then save again.";
+
+// Until supabase/007 is run, lessons are saved and read without blocks.
+async function lessonBlocksStored() {
+  const { error } = await supabaseAdmin.from("course_lessons").select("blocks").limit(1);
+  if (!error) return true;
+  if (MISSING_COLUMN_CODES.includes(error.code)) return false;
+  throw error;
+}
+
+async function blocksColumnMissing(input) {
+  const sendsBlocks = (input.lessonContent || []).some((lesson) => lesson.blocks?.length);
+  return sendsBlocks && !(await lessonBlocksStored());
+}
+
+function withoutBlocks(select) {
+  return select.split("youtube_url, blocks,").join("youtube_url,");
+}
+
+// Reads courses, falling back to a read without lesson blocks until the
+// blocks column exists.
+async function readCourses(client, select, narrow) {
+  const result = await narrow(client.from("courses").select(select));
+  return MISSING_COLUMN_CODES.includes(result.error?.code)
+    ? narrow(client.from("courses").select(withoutBlocks(select)))
+    : result;
+}
+
 function validateLessons(lessons, sections) {
   if (!Array.isArray(lessons)) return "Lessons must be an array.";
   const seenLessons = new Set();
@@ -353,6 +540,8 @@ function validateLessons(lessons, sections) {
       ...(lesson.youtubeUrl ? [lesson.youtubeUrl] : []),
     ];
     if (!links.every(isWebLink)) return `Lesson "${title}" has a file or video that is not a web link.`;
+    const blockProblem = blocksProblem(lesson.blocks);
+    if (blockProblem) return `Lesson "${title}" ${blockProblem}.`;
     if (lesson.quiz != null) {
       const quizProblem = validateQuiz(lesson.quiz, "lesson");
       if (quizProblem) return `Lesson "${title}" quiz: ${quizProblem}`;
@@ -403,11 +592,7 @@ function sendCourseWriteError(res, error) {
 }
 
 async function findCourse(id, client = supabase) {
-  const { data, error } = await client
-    .from("courses")
-    .select(courseSelect)
-    .eq("id", id)
-    .single();
+  const { data, error } = await readCourses(client, courseSelect, (query) => query.eq("id", id).single());
   if (error) throw error;
   return toCourse(data);
 }
@@ -431,7 +616,7 @@ async function assessmentTablesMissing(input) {
 // Reads courses the way staff see them, with quizzes and answer keys. Until
 // the assessment tables exist, staff still get their courses without quizzes.
 async function readStaffCourses(narrow) {
-  const run = (select) => narrow(supabaseAdmin.from("courses").select(select));
+  const run = (select) => readCourses(supabaseAdmin, select, narrow);
   const result = await run(staffCourseSelect);
   return MISSING_TABLE_CODES.includes(result.error?.code) ? run(courseSelect) : result;
 }
@@ -446,84 +631,130 @@ function lessonKey(lesson) {
   return JSON.stringify([String(lesson.section).trim(), String(lesson.title).trim()]);
 }
 
-// Returns the new id of every lesson, keyed by its section and title.
-async function saveChildren(courseId, input) {
+async function check(request) {
+  const { data, error } = await request;
+  if (error) throw error;
+  return data;
+}
+
+function lessonResourceRows(lessonId, lesson) {
+  return [
+    ...(lesson.slides || []).map((resource, position) => ({
+      lesson_id: lessonId,
+      resource_type: "slide",
+      name: resource.name,
+      url: resource.url,
+      position,
+    })),
+    ...(lesson.video ? [{
+      lesson_id: lessonId,
+      resource_type: "video",
+      name: lesson.video.name,
+      url: lesson.video.url,
+      position: 0,
+    }] : []),
+  ];
+}
+
+// Saves the course's objectives, sections and lessons. Lessons that are kept
+// are updated in place, so they keep their id and everything linked to it,
+// such as quizzes and learners' results. A lesson is kept when the builder
+// sends its id back, or when its section and title are unchanged.
+// `current` is the course as stored before this save (null for a new course).
+// Returns the id of every lesson, keyed by its section and title.
+async function syncChildren(courseId, input, current) {
   const lessonIds = new Map();
+  const storesBlocks = await lessonBlocksStored();
+  await check(supabaseAdmin.from("course_objectives").delete().eq("course_id", courseId));
   const objectives = (input.objectives || [])
     .map((objective, position) => ({ course_id: courseId, objective: String(objective).trim(), position }))
     .filter((item) => item.objective);
-  if (objectives.length) {
-    const { error } = await supabaseAdmin.from("course_objectives").insert(objectives);
-    if (error) throw error;
+  if (objectives.length) await check(supabaseAdmin.from("course_objectives").insert(objectives));
+
+  const storedSections = current
+    ? await check(supabaseAdmin.from("course_sections").select("id, title, position").eq("course_id", courseId))
+    : [];
+  const sectionIds = new Map();
+  for (const [position, sectionTitle] of input.sections.entries()) {
+    const title = String(sectionTitle).trim();
+    const stored = storedSections.find((section) => section.title === title);
+    if (stored) {
+      if (stored.position !== position) {
+        await check(supabaseAdmin.from("course_sections").update({ position }).eq("id", stored.id));
+      }
+      sectionIds.set(title, stored.id);
+    } else {
+      const created = await check(supabaseAdmin
+        .from("course_sections")
+        .insert({ course_id: courseId, title, position })
+        .select("id")
+        .single());
+      sectionIds.set(title, created.id);
+    }
   }
 
-  for (const [sectionPosition, sectionTitle] of input.sections.entries()) {
-    const title = String(sectionTitle).trim();
-    const { data: section, error: sectionError } = await supabaseAdmin
-      .from("course_sections")
-      .insert({ course_id: courseId, title, position: sectionPosition })
-      .select("id")
-      .single();
-    if (sectionError) throw sectionError;
-
-    const sectionLessons = (input.lessonContent || [])
-      .filter((lesson) => String(lesson.section).trim() === title);
-    const lessons = sectionLessons
-      .map((lesson, position) => ({
-        section_id: section.id,
+  // Match each lesson to the stored lesson it continues, if any.
+  const storedLessons = current?.lessonContent || [];
+  const claimed = new Set();
+  const positions = new Map();
+  const plan = (input.lessonContent || []).map((lesson) => {
+    const section = String(lesson.section).trim();
+    const position = positions.get(section) ?? 0;
+    positions.set(section, position + 1);
+    const byId = storedLessons.find((stored) => stored.id && stored.id === lesson.id && !claimed.has(stored.id));
+    const byKey = storedLessons.find((stored) => lessonKey(stored) === lessonKey(lesson) && !claimed.has(stored.id));
+    const stored = byId || byKey;
+    if (stored) claimed.add(stored.id);
+    return {
+      lesson,
+      stored,
+      row: {
+        section_id: sectionIds.get(section),
         title: String(lesson.title).trim(),
         position,
         youtube_url: lesson.youtubeUrl || null,
-      }));
-    if (!lessons.length) continue;
+        ...(storesBlocks ? { blocks: cleanBlocks(lesson.blocks) } : {}),
+      },
+    };
+  });
 
-    const { data: savedLessons, error: lessonsError } = await supabaseAdmin
-      .from("course_lessons")
-      .insert(lessons)
-      .select("id, title");
-    if (lessonsError) throw lessonsError;
-
-    for (const savedLesson of savedLessons) {
-      lessonIds.set(lessonKey({ section: title, title: savedLesson.title }), savedLesson.id);
-      const sourceLesson = sectionLessons.find((lesson) => String(lesson.title).trim() === savedLesson.title);
-      const resources = [
-        ...(sourceLesson?.slides || []).map((resource, position) => ({
-          lesson_id: savedLesson.id,
-          resource_type: "slide",
-          name: resource.name,
-          url: resource.url,
-          position,
-        })),
-        ...(sourceLesson?.video ? [{
-          lesson_id: savedLesson.id,
-          resource_type: "video",
-          name: sourceLesson.video.name,
-          url: sourceLesson.video.url,
-          position: 0,
-        }] : []),
-      ];
-      if (resources.length) {
-        const { error: resourcesError } = await supabaseAdmin.from("lesson_resources").insert(resources);
-        if (resourcesError) throw resourcesError;
-      }
+  // Removed lessons go first, so their titles are free for other lessons.
+  for (const stored of storedLessons) {
+    if (!claimed.has(stored.id)) await check(supabaseAdmin.from("course_lessons").delete().eq("id", stored.id));
+  }
+  // Each section's lesson titles are unique, so a lesson that moves or is
+  // renamed holds a placeholder title until every lesson is in its place.
+  const moving = plan.filter(({ stored, lesson }) => stored && lessonKey(stored) !== lessonKey(lesson));
+  for (const { stored } of moving) {
+    await check(supabaseAdmin.from("course_lessons").update({ title: `moving ${stored.id}` }).eq("id", stored.id));
+  }
+  for (const { lesson, stored, row } of plan) {
+    let lessonId = stored?.id;
+    if (lessonId) {
+      await check(supabaseAdmin.from("course_lessons").update(row).eq("id", lessonId));
+      await check(supabaseAdmin.from("lesson_resources").delete().eq("lesson_id", lessonId));
+    } else {
+      lessonId = (await check(supabaseAdmin.from("course_lessons").insert(row).select("id").single())).id;
     }
+    lessonIds.set(lessonKey(lesson), lessonId);
+    const resources = lessonResourceRows(lessonId, lesson);
+    if (resources.length) await check(supabaseAdmin.from("lesson_resources").insert(resources));
+  }
+
+  const keptSections = new Set(sectionIds.values());
+  for (const section of storedSections) {
+    if (!keptSections.has(section.id)) await check(supabaseAdmin.from("course_sections").delete().eq("id", section.id));
   }
   return lessonIds;
-}
-
-async function replaceChildren(courseId, input) {
-  const { error: objectivesError } = await supabaseAdmin.from("course_objectives").delete().eq("course_id", courseId);
-  if (objectivesError) throw objectivesError;
-  const { error: sectionsError } = await supabaseAdmin.from("course_sections").delete().eq("course_id", courseId);
-  if (sectionsError) throw sectionsError;
-  return saveChildren(courseId, input);
 }
 
 async function restoreCourse(courseId, previous, userId) {
   try {
     const { error } = await supabaseAdmin.from("courses").update(toCourseRow(previous)).eq("id", courseId);
     if (error) throw error;
-    const lessonIds = await replaceChildren(courseId, previous);
+    // The failed save may have changed some lessons, so start from what is stored now.
+    const stored = await findStaffCourse(courseId);
+    const lessonIds = await syncChildren(courseId, previous, stored);
     // Quizzes are only deleted after a save works, so the previous ones still exist.
     await saveCourseAssessments(courseId, previous, previous, lessonIds, userId);
     return true;
@@ -713,17 +944,16 @@ async function createQuiz(input, userId, defaultTitle = "Assessment") {
 }
 
 // Saves the lesson quizzes and final exam sent with a course. Saving a course
-// recreates its lessons, which drops their quiz links, so each quiz is linked
-// again to its lesson's new row and edited in place: its id, unchanged
-// questions, and learners' attempts all stay. `current` is the course as
-// stored before this save (null for a new course), and `lessonIds` are the
-// newly saved lessons, keyed by section and title. A lesson or course sent
+// keeps its lessons in place, and each quiz is linked again to its lesson and
+// edited in place: its id, unchanged questions, and learners' attempts all
+// stay. `current` is the course as stored before this save (null for a new
+// course), and `lessonIds` are the saved lessons, keyed by section and title. A lesson or course sent
 // with no quiz details at all keeps what it had; null removes it.
 // Returns the quizzes the course no longer uses, to delete once the save works.
 async function saveCourseAssessments(courseId, input, current, lessonIds, userId) {
-  const currentQuizIds = new Map((current?.lessonContent || [])
-    .filter((lesson) => lesson.quiz)
-    .map((lesson) => [lessonKey(lesson), lesson.quiz.id]));
+  const currentLessons = (current?.lessonContent || []).filter((lesson) => lesson.quiz);
+  const currentQuizIds = new Map(currentLessons.map((lesson) => [lessonKey(lesson), lesson.quiz.id]));
+  const quizIdsByLesson = new Map(currentLessons.map((lesson) => [lesson.id, lesson.quiz.id]));
   const unused = new Set(currentQuizIds.values());
   const created = [];
   const saveQuiz = async (quiz, defaultTitle) => {
@@ -739,17 +969,26 @@ async function saveCourseAssessments(courseId, input, current, lessonIds, userId
 
   try {
     for (const lesson of input.lessonContent || []) {
+      const lessonId = lessonIds.get(lessonKey(lesson));
       let quizId = null;
       if (lesson.quiz) {
         quizId = await saveQuiz(lesson.quiz, "Lesson quiz");
       } else if (lesson.quiz === undefined) {
-        const kept = currentQuizIds.get(lessonKey(lesson));
+        const kept = quizIdsByLesson.get(lessonId) ?? currentQuizIds.get(lessonKey(lesson));
         if (unused.delete(kept)) quizId = kept;
+      }
+      // A kept lesson still has its link from before, so it is replaced.
+      if (quizIdsByLesson.has(lessonId)) {
+        const { error: unlinkError } = await supabaseAdmin
+          .from("lesson_assessments")
+          .delete()
+          .eq("lesson_id", lessonId);
+        if (unlinkError) throw unlinkError;
       }
       if (!quizId) continue;
       const { error } = await supabaseAdmin
         .from("lesson_assessments")
-        .insert({ lesson_id: lessonIds.get(lessonKey(lesson)), quiz_id: quizId });
+        .insert({ lesson_id: lessonId, quiz_id: quizId });
       if (error) throw error;
     }
 
@@ -878,11 +1117,8 @@ app.get("/api/status", async (req, res) => {
 
 app.get("/api/courses", async (req, res) => {
   if (!requireSupabase(res)) return;
-  const { data, error } = await supabase
-    .from("courses")
-    .select(courseSelect)
-    .eq("status", "published")
-    .order("created_at", { ascending: true });
+  const { data, error } = await readCourses(supabase, courseSelect, (query) =>
+    query.eq("status", "published").order("created_at", { ascending: true }));
   if (error) {
     res.status(500).json({ error: error.message });
     return;
@@ -910,6 +1146,15 @@ app.post("/api/courses", requireStaff, async (req, res) => {
     res.status(503).json({ error: ASSESSMENTS_NOT_SET_UP });
     return;
   }
+  try {
+    if (await blocksColumnMissing(req.body)) {
+      res.status(503).json({ error: BLOCKS_NOT_SET_UP });
+      return;
+    }
+  } catch (blocksError) {
+    res.status(500).json({ error: getErrorMessage(blocksError) });
+    return;
+  }
   const input = req.body;
   const { data, error } = await supabaseAdmin
     .from("courses")
@@ -921,7 +1166,7 @@ app.post("/api/courses", requireStaff, async (req, res) => {
     return;
   }
   try {
-    const lessonIds = await saveChildren(data.id, input);
+    const lessonIds = await syncChildren(data.id, input, null);
     await saveCourseAssessments(data.id, input, null, lessonIds, req.user.id);
     res.status(201).json({ course: await findStaffCourse(data.id) });
   } catch (childError) {
@@ -941,6 +1186,15 @@ app.put("/api/courses/:id", requireStaff, async (req, res) => {
     res.status(503).json({ error: ASSESSMENTS_NOT_SET_UP });
     return;
   }
+  try {
+    if (await blocksColumnMissing(req.body)) {
+      res.status(503).json({ error: BLOCKS_NOT_SET_UP });
+      return;
+    }
+  } catch (blocksError) {
+    res.status(500).json({ error: getErrorMessage(blocksError) });
+    return;
+  }
   const input = req.body;
   let previous;
   try {
@@ -958,7 +1212,7 @@ app.put("/api/courses/:id", requireStaff, async (req, res) => {
     return;
   }
   try {
-    const lessonIds = await replaceChildren(req.params.id, input);
+    const lessonIds = await syncChildren(req.params.id, input, previous);
     const unusedQuizIds = await saveCourseAssessments(req.params.id, input, previous, lessonIds, req.user.id);
     await removeQuizzes(unusedQuizIds);
     res.json({ course: await findStaffCourse(req.params.id) });
@@ -1542,6 +1796,117 @@ app.put("/api/staff/members/:id/role", requireStaff, async (req, res) => {
 });
 
 // Staff are checked before the file is read, so outsiders cannot send large bodies.
+// Reusable block templates (supabase/008_block_templates.sql), shared by
+// every staff and instructor account.
+const TEMPLATES_NOT_SET_UP =
+  "Block templates are not set up in the database yet. Run supabase/008_block_templates.sql in the Supabase SQL editor, then try again.";
+
+function toTemplate(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || "",
+    html: row.html,
+    fields: Array.isArray(row.fields) ? row.fields : [],
+    createdBy: row.created_by,
+    updatedAt: row.updated_at,
+  };
+}
+
+function templateProblem(input) {
+  if (!input || typeof input !== "object") return "A template is required.";
+  if (!textOf(input.name, 80)?.trim()) return "Give the template a name of up to 80 characters.";
+  if (!optionalText(input.description, 500)) return "The description must be 500 characters or fewer.";
+  if (!textOf(input.html, 100000)?.trim()) return "A template needs some HTML, up to 100,000 characters.";
+  const fieldsProblem = templateFieldsProblem(input.fields ?? []);
+  return fieldsProblem ? `The template ${fieldsProblem}.` : null;
+}
+
+function templateRow(input) {
+  return {
+    name: input.name.trim(),
+    description: (input.description || "").trim(),
+    html: input.html,
+    fields: cleanTemplateFields(input.fields ?? []),
+  };
+}
+
+function sendTemplateError(res, error) {
+  if (MISSING_TABLE_CODES.includes(error.code)) {
+    res.status(503).json({ error: TEMPLATES_NOT_SET_UP });
+  } else if (error.code === "23505") {
+    res.status(409).json({ error: "A template with this name already exists. Choose another name." });
+  } else if (error.code === "PGRST116" || error.code === "22P02") {
+    res.status(404).json({ error: "Template not found." });
+  } else {
+    res.status(500).json({ error: getErrorMessage(error) });
+  }
+}
+
+app.get("/api/staff/block-templates", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const { data, error } = await supabaseAdmin
+    .from("lesson_block_templates")
+    .select("*")
+    .order("name", { ascending: true });
+  if (error) {
+    sendTemplateError(res, error);
+    return;
+  }
+  // Sorted here too, so the order never depends on the database.
+  const templates = (data || []).map(toTemplate).sort((a, b) => a.name.localeCompare(b.name));
+  res.json({ templates });
+});
+
+app.post("/api/staff/block-templates", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const problem = templateProblem(req.body);
+  if (problem) {
+    res.status(400).json({ error: problem });
+    return;
+  }
+  const { data, error } = await supabaseAdmin
+    .from("lesson_block_templates")
+    .insert({ ...templateRow(req.body), created_by: req.user.id })
+    .select("*")
+    .single();
+  if (error) {
+    sendTemplateError(res, error);
+    return;
+  }
+  res.status(201).json({ template: toTemplate(data) });
+});
+
+app.put("/api/staff/block-templates/:id", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const problem = templateProblem(req.body);
+  if (problem) {
+    res.status(400).json({ error: problem });
+    return;
+  }
+  try {
+    await readSingleReference("lesson_block_templates", "id", req.params.id);
+    const { error } = await supabaseAdmin
+      .from("lesson_block_templates")
+      .update(templateRow(req.body))
+      .eq("id", req.params.id);
+    if (error) throw error;
+    res.json({ template: toTemplate(await readSingleReference("lesson_block_templates", "id", req.params.id)) });
+  } catch (error) {
+    sendTemplateError(res, error);
+  }
+});
+
+app.delete("/api/staff/block-templates/:id", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const { error } = await supabaseAdmin.from("lesson_block_templates").delete().eq("id", req.params.id);
+  if (error) {
+    sendTemplateError(res, error);
+    return;
+  }
+  res.status(204).end();
+});
+
 app.post("/api/uploads", requireStaff, express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }), async (req, res) => {
   if (!requireSupabaseAdmin(res)) return;
   const kindName = String(req.query.kind || "");

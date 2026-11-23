@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useState, type DragEvent, type ReactNode } from "react";
+import type { CourseResource } from "./StaffPages";
 
 // Small pieces shared by the course builder and its quiz editor.
 
@@ -78,5 +79,108 @@ export function RemoveButton({
     >
       {children}
     </button>
+  );
+}
+
+export function FileField({
+  label,
+  hint,
+  accept,
+  multiple = false,
+  replacing = false,
+  onFiles,
+  children,
+}: {
+  label: string;
+  hint: string;
+  accept: string;
+  multiple?: boolean;
+  replacing?: boolean;
+  onFiles: (files: File[]) => Promise<void>;
+  children?: ReactNode;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const takeFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      await onFiles(multiple ? files : files.slice(0, 1));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    void takeFiles(Array.from(event.dataTransfer.files));
+  };
+
+  return (
+    <div className="file-field">
+      <label
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+      >
+        <span className="field-name">{label}</span>
+        <input
+          className="file-input"
+          type="file"
+          accept={accept}
+          multiple={multiple}
+          onChange={(event) => {
+            const files = Array.from(event.target.files ?? []);
+            // Clearing the input lets staff pick the same file again after a failure.
+            event.target.value = "";
+            void takeFiles(files);
+          }}
+        />
+        <span
+          className={`file-drop${dragging ? " dragging" : ""}${uploading ? " uploading" : ""}`}
+        >
+          <span className="file-drop-icon">
+            <FormIcon name="upload" />
+          </span>
+          <span>
+            {uploading ? (
+              "Uploading..."
+            ) : (
+              <>
+                Drag {replacing ? "a new file" : multiple ? "files" : "a file"}{" "}
+                here or <u>browse</u>
+              </>
+            )}
+          </span>
+          <small>{hint}</small>
+        </span>
+      </label>
+      {children}
+    </div>
+  );
+}
+
+export function FileRow({
+  file,
+  onRemove,
+}: {
+  file: CourseResource;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="file-row">
+      <FormIcon name="file" />
+      <a href={file.url} target="_blank" rel="noreferrer">
+        {file.name}
+      </a>
+      <RemoveButton label={`Remove ${file.name}`} onClick={onRemove}>
+        <FormIcon name="close" size={16} />
+      </RemoveButton>
+    </div>
   );
 }

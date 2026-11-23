@@ -138,7 +138,7 @@ async function createCourse(overrides) {
   return (await response.json()).course;
 }
 
-// Lesson ids change whenever a course is saved, so content is compared without them.
+// Content is compared without lesson ids, which are checked on their own.
 function withoutLessonIds(saved) {
   for (const lesson of saved.lessonContent) assert.equal(typeof lesson.id, "string");
   return { ...saved, lessonContent: saved.lessonContent.map(({ id, ...lesson }) => lesson) };
@@ -314,6 +314,18 @@ const invalidCourses = [
     "a YouTube link that is not a web link",
     { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], youtubeUrl: "javascript:alert(1)" }] },
   ],
+  ["blocks that are not a list", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: "text" }] }],
+  ["a block of an unknown type", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "script", text: "x" }] }] }],
+  ["a block with no id", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ type: "text", text: "Hello" }] }] }],
+  ["two blocks with the same id", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "text", text: "1" }, { id: "a", type: "text", text: "2" }] }] }],
+  ["an empty text block", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "text", text: "  " }] }] }],
+  ["an image block with no description", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "image", url: "https://example.com/a.png", alt: "" }] }] }],
+  ["an image block that is not a web link", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "image", url: "javascript:alert(1)", alt: "A board" }] }] }],
+  ["a YouTube block with another site's link", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "youtube", url: "https://example.com/watch?v=abc" }] }] }],
+  ["a PDF block that is not a web link", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "pdf", name: "a.pdf", url: "file:///a.pdf" }] }] }],
+  ["an empty HTML block", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "html", html: "" }] }] }],
+  ["an arrange block with one line", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "arrange", code: "void setup() {}\n\n" }] }] }],
+  ["too many blocks", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: Array.from({ length: 61 }, (_, index) => ({ id: String(index), type: "text", text: "Hi" })) }] }],
 ];
 
 for (const [description, overrides] of invalidCourses) {
@@ -434,7 +446,7 @@ test("deleting a course removes it and everything inside it", async () => {
 });
 
 test("a request body that is too big returns a clear error", async () => {
-  const response = await sendCourse("POST", "/api/courses", course({ desc: "x".repeat(MEGABYTE + 1) }));
+  const response = await sendCourse("POST", "/api/courses", course({ desc: "x".repeat(5 * MEGABYTE + 1) }));
 
   await assertJsonError(response, 413);
 });
@@ -461,6 +473,8 @@ const uploadCases = [
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   ],
   ["video", "preview.mp4", "lesson-resources", "video/mp4"],
+  ["lesson-image", "wiring.png", "lesson-resources", "image/png"],
+  ["lesson-pdf", "exercise sheet.pdf", "lesson-resources", "application/pdf"],
 ];
 
 for (const [kind, name, bucket, contentType] of uploadCases) {
@@ -503,6 +517,8 @@ const refusedUploads = [
   ["instructor-image", "photo"],
   ["slide", "program.exe"],
   ["video", "still.png"],
+  ["lesson-pdf", "slides.pptx"],
+  ["lesson-image", "diagram.svg"],
   ["unknown", "photo.png"],
   ["constructor", "photo.png"],
   ["course-image", ""],
@@ -656,6 +672,14 @@ function setRole(userId, role, { token = STAFF_TOKEN } = {}) {
     headers: signedIn(token, { "Content-Type": "application/json" }),
     body: JSON.stringify({ role }),
   });
+}
+
+// Final exams open only once every lesson is complete, so exam tests mark
+// the member's lessons done first.
+function completeLessons(course, userId = memberUser.id) {
+  for (const lesson of course.lessonContent) {
+    recordProgress(userId, course.id, JSON.stringify([lesson.section, lesson.title]), new Date(0).toISOString());
+  }
 }
 
 function recordProgress(userId, courseId, lessonKey, completedAt) {
@@ -902,6 +926,7 @@ for (const [name, type, count] of questionCountCases) {
 
 test("a final exam passes at 80% unless the instructor sets another mark", async () => {
   const created = await createCourse();
+  completeLessons(created);
   const exam = await createFinalExam(created.id);
   assert.equal(exam.passMark, 80);
   assert.equal(fake.db.final_exams[0].pass_mark, 80);
@@ -962,11 +987,155 @@ test("saving a course keeps its lesson quizzes and their attempts", async () => 
   const response = await sendCourse("PUT", `/api/courses/${created.id}`, course({ title: "Flight Basics 2" }));
   assert.equal(response.status, 200);
   const saved = (await response.json()).course;
-  assert.notEqual(saved.lessonContent[0].id, welcome.id);
+  assert.equal(saved.lessonContent[0].id, welcome.id);
   const reloaded = (await (await loadLessonQuiz(saved.lessonContent[0].id)).json()).assessment;
   assert.equal(reloaded.id, quiz.id);
   assert.equal(fake.db.assessment_attempts.length, 1);
   assert.equal((await loadLessonQuiz(saved.lessonContent[1].id)).status, 404);
+});
+
+const everyBlock = [
+  { id: "t1", type: "text", text: "# Blink\nMake the **LED** flash." },
+  { id: "i1", type: "image", url: "https://example.com/uno.png", alt: "An Arduino Uno", caption: "The board" },
+  { id: "y1", type: "youtube", url: "https://youtu.be/abc123", title: "Blink in 5 minutes" },
+  { id: "p1", type: "pdf", name: "sheet.pdf", url: "https://example.com/sheet.pdf" },
+  { id: "v1", type: "video", name: "clip.mp4", url: "https://example.com/clip.mp4" },
+  { id: "h1", type: "html", html: "<button>Press me</button><script>1</script>", title: "Button" },
+  { id: "a1", type: "arrange", code: "void setup() {\n  pinMode(13, OUTPUT);\n}", title: "Order it", instructions: "Drag the lines." },
+];
+
+test("lesson blocks are saved and read back in order", async () => {
+  const created = await createCourse({
+    lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: everyBlock }],
+  });
+  assert.deepEqual(created.lessonContent[0].blocks, everyBlock);
+  assert.deepEqual((await readCourse(created.id)).lessonContent[0].blocks, everyBlock);
+});
+
+test("only the fields a block needs are stored", async () => {
+  const created = await createCourse({
+    lessonContent: [
+      { title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "t1", type: "text", text: "Hi", secret: "x", url: "y" }] },
+    ],
+  });
+  assert.deepEqual(created.lessonContent[0].blocks, [{ id: "t1", type: "text", text: "Hi" }]);
+});
+
+test("a lesson with no blocks reads as it always has, and blocks can be removed", async () => {
+  const created = await createCourse({
+    lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: everyBlock }],
+  });
+  const response = await sendCourse(
+    "PUT",
+    `/api/courses/${created.id}`,
+    course({ lessonContent: [{ ...created.lessonContent[0], blocks: [] }] }),
+  );
+  assert.equal(response.status, 200);
+  const [lesson] = (await readCourse(created.id)).lessonContent;
+  assert.equal("blocks" in lesson, false);
+  assert.equal(lesson.id, created.lessonContent[0].id);
+});
+
+test("before the blocks column is set up, courses still load and save, and adding blocks says what to run", async () => {
+  const created = await createCourse();
+  fake.dropColumn("course_lessons.blocks");
+
+  assert.equal((await fetch(`${api}/api/courses`)).status, 200);
+  assert.equal((await readCourse(created.id)).title, created.title);
+  assert.equal((await staffGet("/api/staff/courses")).status, 200);
+  const edited = await sendCourse("PUT", `/api/courses/${created.id}`, course({ desc: "Updated" }));
+  assert.equal(edited.status, 200);
+  assert.equal((await readCourse(created.id)).desc, "Updated");
+
+  const withBlocks = await sendCourse(
+    "PUT",
+    `/api/courses/${created.id}`,
+    course({ lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: everyBlock }] }),
+  );
+  assert.match(await assertJsonError(withBlocks, 503), /007_lesson_blocks.sql/);
+  assert.equal((await readCourse(created.id)).desc, "Updated");
+});
+
+test("saving a course keeps each lesson's id, even when it is renamed or moved", async () => {
+  const created = await createCourse();
+  const [setupWelcome, flyingWelcome] = created.lessonContent;
+  const response = await sendCourse(
+    "PUT",
+    `/api/courses/${created.id}`,
+    course({
+      sections: ["Flying", "Landing"],
+      lessonContent: [
+        { ...setupWelcome, title: "First flight", section: "Flying" },
+        { ...flyingWelcome, section: "Landing" },
+        { title: "Approach", section: "Landing", slides: [] },
+      ],
+    }),
+  );
+  assert.equal(response.status, 200);
+  const saved = await readCourse(created.id);
+  assert.deepEqual(
+    saved.lessonContent.map(({ id, section, title }) => [id === setupWelcome.id, id === flyingWelcome.id, section, title]),
+    [
+      [true, false, "Flying", "First flight"],
+      [false, true, "Landing", "Welcome"],
+      [false, false, "Landing", "Approach"],
+    ],
+  );
+  assert.equal(saved.lessonContent[0].youtubeUrl, setupWelcome.youtubeUrl);
+  assert.deepEqual(saved.lessonContent[0].slides, setupWelcome.slides);
+  assert.equal(fake.db.course_sections.length, 2);
+  assert.equal(fake.db.course_lessons.length, 3);
+  assert.equal(fake.db.lesson_resources.length, 2);
+});
+
+test("lessons sent without ids keep their ids when their section and title match", async () => {
+  const created = await createCourse();
+  const response = await sendCourse("PUT", `/api/courses/${created.id}`, course({ title: "Flight Basics 2" }));
+  assert.equal(response.status, 200);
+  const saved = await readCourse(created.id);
+  assert.deepEqual(saved.lessonContent.map((lesson) => lesson.id), created.lessonContent.map((lesson) => lesson.id));
+});
+
+test("two lessons can swap titles in one save", async () => {
+  const created = await createCourse({
+    sections: ["Setup"],
+    lessonContent: [
+      { title: "One", section: "Setup", slides: [] },
+      { title: "Two", section: "Setup", slides: [] },
+    ],
+  });
+  const [one, two] = created.lessonContent;
+  const response = await sendCourse(
+    "PUT",
+    `/api/courses/${created.id}`,
+    course({
+      sections: ["Setup"],
+      lessonContent: [
+        { ...two, title: "One" },
+        { ...one, title: "Two" },
+      ],
+    }),
+  );
+  assert.equal(response.status, 200);
+  const saved = await readCourse(created.id);
+  assert.deepEqual(saved.lessonContent.map((lesson) => [lesson.id, lesson.title]), [[two.id, "One"], [one.id, "Two"]]);
+});
+
+test("a lesson id from another course is treated as a new lesson", async () => {
+  const other = await createCourse({ title: "Other Course" });
+  const created = await createCourse();
+  const response = await sendCourse(
+    "PUT",
+    `/api/courses/${created.id}`,
+    course({
+      sections: ["Setup"],
+      lessonContent: [{ id: other.lessonContent[0].id, title: "Borrowed", section: "Setup", slides: [] }],
+    }),
+  );
+  assert.equal(response.status, 200);
+  const saved = await readCourse(created.id);
+  assert.notEqual(saved.lessonContent[0].id, other.lessonContent[0].id);
+  assert.equal((await readCourse(other.id)).lessonContent[0].title, "Welcome");
 });
 
 test("a course edit that fails puts its lesson quizzes back too", async () => {
@@ -982,6 +1151,7 @@ test("a course edit that fails puts its lesson quizzes back too", async () => {
 
 test("final exams enforce three attempts and issue one certificate when passed", async () => {
   const created = await createCourse();
+  completeLessons(created);
   const exam = await createFinalExam(created.id, 50);
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -1000,8 +1170,24 @@ test("final exams enforce three attempts and issue one certificate when passed",
   assert.equal(fake.db.course_completions.length, 1);
 });
 
+test("a member must complete every lesson before opening or submitting the final exam", async () => {
+  const created = await createCourse();
+  const exam = await createFinalExam(created.id);
+  const [first] = created.lessonContent;
+  recordProgress(memberUser.id, created.id, JSON.stringify([first.section, first.title]), new Date(0).toISOString());
+
+  const open = await sendJson("GET", `/api/courses/${created.id}/final-exam`, undefined, { token: MEMBER_TOKEN });
+  assert.match(await assertJsonError(open, 403), /Complete all course lessons/);
+  assert.match(await assertJsonError(await submit(exam.id, answersFor(exam)), 403), /Complete all course lessons/);
+  assert.equal(fake.db.assessment_attempts.length, 0);
+
+  completeLessons(created);
+  assert.equal((await submit(exam.id, answersFor(exam))).status, 201);
+});
+
 test("a final exam refuses a fourth failed attempt", async () => {
   const created = await createCourse();
+  completeLessons(created);
   const exam = await createFinalExam(created.id, 100);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     assert.equal((await submit(exam.id, answersFor(exam, 0))).status, 201);
@@ -1011,6 +1197,7 @@ test("a final exam refuses a fourth failed attempt", async () => {
 
 test("a passing submission that cannot issue the certificate does not use up an attempt", async () => {
   const created = await createCourse();
+  completeLessons(created);
   const exam = await createFinalExam(created.id);
   fake.failNext("certificates");
 
@@ -1083,6 +1270,7 @@ test("the attempt history skips questions added after the attempt", async () => 
 
 test("final exam history says how many attempts remain", async () => {
   const created = await createCourse();
+  completeLessons(created);
   const exam = await createFinalExam(created.id);
   await submit(exam.id, answersFor(exam, 0));
   const body = await (await loadAttempts(exam.id)).json();
@@ -1328,4 +1516,98 @@ test("the public course reads never include quizzes or answer keys", async () =>
     assert.equal(JSON.stringify(publicCourse).includes("isCorrect"), false);
     assert.equal(JSON.stringify(publicCourse).includes("Ailerons"), false);
   }
+});
+
+const quizCardTemplate = {
+  name: "Quiz card",
+  description: "A flip card with a question and an answer.",
+  html: "<button>{{question}}</button><p hidden>{{answer}}</p>",
+  fields: [
+    { key: "question", label: "Question" },
+    { key: "answer", label: "Answer" },
+  ],
+};
+
+test("staff and instructors can save, list, change and delete block templates", async () => {
+  const created = await sendJson("POST", "/api/staff/block-templates", quizCardTemplate, { token: INSTRUCTOR_TOKEN });
+  assert.equal(created.status, 201);
+  const { template } = await created.json();
+  assert.equal(template.name, "Quiz card");
+  assert.equal(template.createdBy, instructorUser.id);
+  assert.deepEqual(template.fields, quizCardTemplate.fields);
+
+  await sendJson("POST", "/api/staff/block-templates", { ...quizCardTemplate, name: "Another" });
+  const listed = await (await staffGet("/api/staff/block-templates")).json();
+  assert.deepEqual(listed.templates.map((item) => item.name), ["Another", "Quiz card"]);
+
+  const changed = await sendJson("PUT", `/api/staff/block-templates/${template.id}`, {
+    ...quizCardTemplate,
+    html: "<b>{{question}}</b>",
+    fields: [{ key: "question", label: "The question" }],
+  });
+  assert.equal(changed.status, 200);
+  assert.equal((await changed.json()).template.html, "<b>{{question}}</b>");
+
+  assert.equal((await sendJson("DELETE", `/api/staff/block-templates/${template.id}`)).status, 204);
+  assert.deepEqual((await (await staffGet("/api/staff/block-templates")).json()).templates.map((item) => item.name), ["Another"]);
+});
+
+test("members cannot see or change block templates", async () => {
+  assert.equal((await staffGet("/api/staff/block-templates", { token: MEMBER_TOKEN })).status, 403);
+  await assertJsonError(await sendJson("POST", "/api/staff/block-templates", quizCardTemplate, { token: MEMBER_TOKEN }), 403);
+  assert.equal(fake.db.lesson_block_templates.length, 0);
+});
+
+const invalidTemplates = [
+  ["no name", { name: " " }],
+  ["no HTML", { html: "" }],
+  ["a field name with spaces", { fields: [{ key: "my field", label: "Field" }] }],
+  ["a repeated field", { fields: [{ key: "a", label: "A" }, { key: "a", label: "Again" }] }],
+  ["a field without a label", { fields: [{ key: "a", label: "" }] }],
+];
+
+for (const [description, overrides] of invalidTemplates) {
+  test(`a block template with ${description} is refused`, async () => {
+    await assertJsonError(await sendJson("POST", "/api/staff/block-templates", { ...quizCardTemplate, ...overrides }), 400);
+    assert.equal(fake.db.lesson_block_templates.length, 0);
+  });
+}
+
+test("two templates cannot share a name, and a missing template is not found", async () => {
+  await sendJson("POST", "/api/staff/block-templates", quizCardTemplate);
+  assert.match(await assertJsonError(await sendJson("POST", "/api/staff/block-templates", quizCardTemplate), 409), /name/);
+  await assertJsonError(await sendJson("PUT", `/api/staff/block-templates/${randomId()}`, quizCardTemplate), 404);
+});
+
+test("before the templates table is set up, templates say what to run", async () => {
+  fake.dropTable("lesson_block_templates");
+  assert.match(await assertJsonError(await staffGet("/api/staff/block-templates"), 503), /008_block_templates\.sql/);
+});
+
+test("a template block keeps its own copy of the template and only values for its fields", async () => {
+  const block = {
+    id: "q1",
+    type: "template",
+    templateId: randomId(),
+    templateName: "Quiz card",
+    html: quizCardTemplate.html,
+    fields: quizCardTemplate.fields,
+    values: { question: "What does pinMode do?" },
+  };
+  const created = await createCourse({
+    lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [block] }],
+  });
+  assert.deepEqual(created.lessonContent[0].blocks, [
+    { ...block, values: { question: "What does pinMode do?", answer: "" } },
+  ]);
+
+  const stray = await sendCourse(
+    "POST",
+    "/api/courses",
+    course({
+      title: "Stray",
+      lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ ...block, values: { other: "x" } }] }],
+    }),
+  );
+  assert.match(await assertJsonError(stray, 400), /other/);
 });

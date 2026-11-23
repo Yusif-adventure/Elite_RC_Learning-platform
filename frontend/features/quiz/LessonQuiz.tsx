@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { QuizText } from "../../RichText";
 import { loadAttemptHistory, loadLessonQuiz, submitAttempt } from "./quizApi";
 import {
   allAnswered,
@@ -244,7 +245,7 @@ export function LessonQuiz({
                   <fieldset className={`lesson-quiz-question${missing ? " is-missing" : ""}`} disabled={submitting}>
                     <legend>
                       <span className="lesson-quiz-number">Question {index + 1}</span>
-                      {question.questionText}
+                      <QuizText text={question.questionText} />
                     </legend>
                     <div className="lesson-quiz-choices">
                       {question.choices.map((choice) => {
@@ -258,7 +259,7 @@ export function LessonQuiz({
                               checked={selected}
                               onChange={() => setAnswers((current) => ({ ...current, [question.id]: choice.id }))}
                             />
-                            <span>{choice.text}</span>
+                            <span><QuizText text={choice.text} /></span>
                           </label>
                         );
                       })}
@@ -326,7 +327,7 @@ export function LessonQuiz({
                           </p>
                           <h4>
                             <span className="lesson-quiz-number">Question {number}</span>
-                            {question.questionText}
+                            <QuizText text={question.questionText} />
                           </h4>
                           <ul className="lesson-quiz-choices">
                             {question.choices.map((choice) => {
@@ -340,7 +341,7 @@ export function LessonQuiz({
                                   ) : (
                                     <Mark kind="right" />
                                   )}
-                                  <span>{choice.text}</span>
+                                  <span><QuizText text={choice.text} /></span>
                                   {outcome !== "other" && <em>{OUTCOME_LABEL[outcome]}</em>}
                                 </li>
                               );
@@ -349,7 +350,7 @@ export function LessonQuiz({
                           {item.explanation && (
                             <p className="lesson-quiz-explanation">
                               <b>Why</b>
-                              {item.explanation}
+                              <QuizText text={item.explanation} />
                             </p>
                           )}
                         </article>

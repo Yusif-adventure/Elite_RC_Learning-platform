@@ -1,10 +1,11 @@
 import { supabase } from "../../supabaseClient";
 import type { Member, Role, StaffProgressRow } from "../../staffStats";
 import type { CourseResource, StaffCourse } from "./StaffPages";
+import type { BlockTemplate } from "../lesson/blocks";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
-export type UploadKind = "course-image" | "instructor-image" | "slide" | "video";
+export type UploadKind = "course-image" | "instructor-image" | "slide" | "video" | "lesson-image" | "lesson-pdf";
 
 // The backend only accepts changes from a signed-in staff account.
 async function withSignIn(headers: Record<string, string>) {
@@ -86,4 +87,25 @@ export async function setMemberRole(memberId: string, role: Role): Promise<Membe
   });
   const payload: { member: Member } = await response.json();
   return payload.member;
+}
+
+// Reusable block templates, shared by every staff and instructor account.
+export type TemplateInput = Pick<BlockTemplate, "name" | "description" | "html" | "fields">;
+
+export function fetchBlockTemplates() {
+  return getJson<BlockTemplate[]>("/api/staff/block-templates", "templates");
+}
+
+export async function saveBlockTemplate(template: TemplateInput, id?: string): Promise<BlockTemplate> {
+  const response = await send(id ? `/api/staff/block-templates/${encodeURIComponent(id)}` : "/api/staff/block-templates", {
+    method: id ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(template),
+  });
+  const payload: { template: BlockTemplate } = await response.json();
+  return payload.template;
+}
+
+export async function deleteBlockTemplate(id: string) {
+  await send(`/api/staff/block-templates/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

@@ -434,6 +434,11 @@ src/
 - [`supabase/006_assessment_fixes.sql`](./supabase/006_assessment_fixes.sql):
   sets the final-exam pass mark default to 80%, leaves completions and
   certificates to the backend, and hides final exams in draft courses.
+- [`supabase/007_lesson_blocks.sql`](./supabase/007_lesson_blocks.sql): the
+  list of blocks (text, images, videos, PDFs, HTML and arrange-the-lines
+  puzzles) stored with each lesson.
+- [`supabase/008_block_templates.sql`](./supabase/008_block_templates.sql):
+  reusable block templates shared by staff and instructors.
 
 ## Running the project
 
@@ -563,6 +568,25 @@ return them with their answer keys; the public course reads never do.
   80 when left out. Lesson quizzes need 10 to 25 questions and final exams 50. These rules also apply to the separate final exam routes.
 - If `supabase/004_assessments.sql` has not been run, courses still load and
   save, and saving one with a quiz explains which file to run.
+- Saving a course updates its lessons in place, so a lesson keeps its id, quiz
+  and learners' results when it is renamed or moved.
+
+### Lesson blocks
+
+- Each lesson can hold an ordered list of blocks: text (with headings, lists,
+  callouts, `inline code` and ```code blocks), images, YouTube videos that
+  play in the lesson, PDFs to read on the page or download, video files, HTML
+  with CSS and JavaScript, and arrange-the-lines puzzles.
+- HTML blocks run in a sandboxed frame without `allow-same-origin`, so they
+  cannot read the learner's sign-in, cookies or storage.
+- An HTML block can be saved as a template. Each `{{placeholder}}` becomes a
+  box to fill in, and scripts read the values from `BLOCK_DATA`. Lessons keep
+  their own copy, so changing a template never changes an existing lesson.
+- Lessons without blocks look exactly as before. Their slides, video and
+  YouTube link still show after any blocks.
+- If `supabase/007_lesson_blocks.sql` has not been run, courses still load and
+  save, and saving one with blocks explains which file to run. The same goes
+  for templates and `supabase/008_block_templates.sql`.
 
 ### Thursday release runbooks
 
@@ -584,10 +608,14 @@ return them with their answer keys; the public course reads never do.
 7. Run [`supabase/005_protect_answer_keys.sql`](./supabase/005_protect_answer_keys.sql).
    Without it, anyone with the public anon key can read quiz answer keys.
 8. Run [`supabase/006_assessment_fixes.sql`](./supabase/006_assessment_fixes.sql).
-9. Copy the project URL, anon key, and service role key into `backend/.env`,
+9. Run [`supabase/007_lesson_blocks.sql`](./supabase/007_lesson_blocks.sql)
+   and [`supabase/008_block_templates.sql`](./supabase/008_block_templates.sql)
+   to enable lesson blocks and block templates. On the live project these
+   run by themselves once [Database migrations](#database-migrations) is set up.
+10. Copy the project URL, anon key, and service role key into `backend/.env`,
    and the URL and anon key into `frontend/.env`.
-10. Start the backend and verify `GET http://localhost:5000/api/status`.
-11. Make at least one staff account (see [Staff access](#staff-access)).
+11. Start the backend and verify `GET http://localhost:5000/api/status`.
+12. Make at least one staff account (see [Staff access](#staff-access)).
 
 The first migration creates normalized course, objective, section, lesson, and
 resource tables. It also seeds two courses and creates public-read storage
@@ -602,6 +630,42 @@ creates assessment content and attempt records. The fifth makes answer keys
 and explanations available only to the backend service role, which calculates
 scores and enforces final-exam limits before returning feedback to learners.
 The sixth leaves completions and certificates to the backend too.
+
+
+### Database migrations
+
+New SQL files in `supabase/` run on the live database by themselves when they
+reach `main`. The GitHub workflow
+[`.github/workflows/database-migrations.yml`](./.github/workflows/database-migrations.yml)
+runs [`scripts/migrate-database.sh`](./scripts/migrate-database.sh), which:
+
+- runs each `supabase/NNN_name.sql` file once, in number order, and records
+  it in a `public.schema_migrations` table so it never runs again;
+- runs each file in one transaction, so a file that fails changes nothing
+  and stops the run (the workflow shows red in the Actions tab);
+- on its very first run, records `001` to `006` as already applied without
+  running them, because they were run by hand before. `001` adds sample
+  courses, which must not come back on the live site.
+
+Pushes that add no SQL file do not touch the database.
+
+**One-time setup** (needs admin access to the GitHub repository):
+
+1. In Supabase, open the project and click **Connect** at the top of the page.
+2. Under **Connection String**, choose **Session pooler**, not Direct
+   connection (GitHub cannot reach the direct address). Copy the URI. It
+   looks like
+   `postgresql://postgres.<project-ref>:[YOUR-PASSWORD]@aws-0-<region>.pooler.supabase.com:5432/postgres`.
+3. Replace `[YOUR-PASSWORD]` with the database password, including removing
+   the square brackets. If you do not know it, reset it under **Project
+   Settings > Database > Reset database password**, using only letters and
+   numbers. The site does not use this password, so resetting it is safe.
+4. In GitHub, open the repository's **Settings > Secrets and variables >
+   Actions** and click **New repository secret**. Name it `SUPABASE_DB_URL`,
+   paste the URI from step 3, and save.
+5. Open the **Actions** tab, choose **Database migrations**, and click **Run
+   workflow** on `main`, or simply merge a pull request that adds an SQL file.
+   The log lists each file as "Already applied" or "Applying".
 
 ### Assessment rules the backend enforces
 

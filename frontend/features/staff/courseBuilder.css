@@ -775,3 +775,175 @@
     width: 100%;
   }
 }
+
+/* Lesson blocks in the builder */
+
+.block-editor {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.block-editor-head {
+  display: grid;
+  gap: 4px;
+}
+
+.block-editor-head small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.block-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.block-card.has-problem {
+  border-color: var(--red);
+}
+
+.block-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.block-card-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.block-tool {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--navy);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.block-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.block-tool[aria-pressed="true"] {
+  border-color: var(--blue);
+  color: var(--blue);
+  background: var(--sky);
+}
+
+.course-form textarea.block-code {
+  font-family: ui-monospace, "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
+  font-size: 13px;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.block-image-preview {
+  width: 100%;
+  max-height: 220px;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  object-fit: contain;
+  background: var(--bg);
+}
+
+.block-preview {
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+
+.block-problem {
+  margin: 0;
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.block-add {
+  display: grid;
+  gap: 8px;
+}
+
+.block-add-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.block-add-button {
+  display: grid;
+  gap: 2px;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 1px dashed var(--blue);
+  border-radius: 10px;
+  color: var(--blue);
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.block-add-button:hover {
+  background: var(--sky);
+}
+
+.block-add-button small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+@media (max-width: 760px) {
+  .block-editor {
+    padding: 12px;
+  }
+
+  .block-add-buttons {
+    grid-template-columns: 1fr;
+  }
+}
+
+.block-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.block-template-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.template-saver {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px dashed var(--blue);
+  border-radius: 10px;
+  background: var(--sky);
+}

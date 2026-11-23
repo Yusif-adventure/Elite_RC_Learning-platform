@@ -22,6 +22,8 @@ import { ConfirmDialog, errorText, useToast } from "./features/staff/Feedback";
 import { useStaffData } from "./features/staff/useStaffData";
 import { withoutAssessments } from "./features/staff/quizDrafts";
 import { LessonQuiz } from "./features/quiz/LessonQuiz";
+import { PdfResource } from "./features/lesson/PdfResource";
+import { LessonBlocks } from "./features/lesson/LessonBlocks";
 import { FinalExamPanel } from "./features/quiz/FinalExamPanel";
 import { CertificateVerification } from "./features/quiz/CertificateVerification";
 import type { Member, Role } from "./staffStats";
@@ -1456,12 +1458,16 @@ function Lesson({
   const nextTitle =
     nextIndex === undefined ? undefined : course.lessonContent?.[nextIndex]?.title;
   const slideCount = lesson?.slides.length ?? 0;
+  const blocks = lesson?.blocks ?? [];
   const included: [IconName, string][] = [];
+  if (blocks.length) included.push(["book", "Lesson notes and activities"]);
   if (slideCount) {
-    included.push(["file", `${slideCount} slide ${slideCount === 1 ? "file" : "files"} to open or download`]);
+    included.push(["file", `${slideCount} slide ${slideCount === 1 ? "file" : "files"} to read on the page or download`]);
   }
   if (lesson?.video) included.push(["video", "A short video preview"]);
   if (lesson?.youtubeUrl) included.push(["play", "The full lesson video on YouTube"]);
+  // Files and videos added the original way, before lessons had blocks.
+  const hasResources = Boolean(slideCount || lesson?.video || lesson?.youtubeUrl);
 
   const completesLesson = Boolean(tracking && !tracking.done && !tracking.hasQuiz);
   // Saves the lesson as complete (when tracking) before moving on.
@@ -1524,6 +1530,12 @@ function Lesson({
             </button>
           </p>
         )}
+        {started && blocks.length > 0 && (
+          <article className="content-card lesson-blocks-card">
+            <LessonBlocks blocks={blocks} />
+          </article>
+        )}
+        {(!started || hasResources || !blocks.length) && (
         <article className="content-card">
           {started ? (
             <>
@@ -1533,17 +1545,7 @@ function Lesson({
                   <b>Slides</b>
                   {lesson?.slides.map((slide) => {
                     const resource = asResource(slide);
-                    return (
-                      <a
-                        href={resource.url}
-                        download={resource.name}
-                        target="_blank"
-                        rel="noreferrer"
-                        key={resource.url}
-                      >
-                        {resource.name} · Open slides
-                      </a>
-                    );
+                    return <PdfResource file={resource} key={resource.url} />;
                   })}
                 </div>
               ) : null}
@@ -1613,6 +1615,7 @@ function Lesson({
             </>
           )}
         </article>
+        )}
         {/* The quiz follows the lesson, once it has been started or completed. */}
         {signedIn && lesson?.id && (started || tracking?.done) && (
           <LessonQuiz lessonId={lesson.id} onMastery={tracking?.onComplete} />

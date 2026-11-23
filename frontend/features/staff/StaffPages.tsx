@@ -16,6 +16,7 @@ import {
   type StaffProgressRow,
 } from "../../staffStats";
 import { ConfirmDialog } from "./Feedback";
+import type { LessonBlock } from "../lesson/blocks";
 import type { StaffDataStatus } from "./useStaffData";
 import type { SavedFinalExam, SavedQuiz } from "./quizDrafts";
 import "./staffDashboard.css";
@@ -54,13 +55,16 @@ export type StaffCourse = {
   sections: string[];
   sampleLessons: string[];
   lessonContent?: {
-    // Database id for loading the lesson's quiz. It changes on every save.
+    // Database id for loading the lesson's quiz. It stays the same when the course is saved.
     id?: string;
     title: string;
     section: string;
     slides: CourseResource[];
     video?: CourseResource;
     youtubeUrl?: string;
+    // Text, images, videos, PDFs, HTML and activities, in order. Left out
+    // for lessons made before blocks existed.
+    blocks?: LessonBlock[];
     // Staff reads include the quiz with its answer key; null removes it on save.
     quiz?: SavedQuiz | null;
   }[];
