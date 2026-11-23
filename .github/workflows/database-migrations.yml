@@ -1,0 +1,45 @@
+name: Database migrations
+
+# Applies new supabase/NNN_name.sql files to the live database when they
+# reach main. Each file runs once; see scripts/migrate-database.sh.
+# Needs the SUPABASE_DB_URL repository secret (see README, "Database
+# migrations").
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/**"
+      - "scripts/migrate-database.sh"
+      - ".github/workflows/database-migrations.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: database-migrations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the database secret is set
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::Add the SUPABASE_DB_URL secret in GitHub: Settings > Secrets and variables > Actions. See the README section Database migrations."
+            exit 1
+          fi
+
+      - name: Install the Postgres client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Apply new SQL files
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: bash scripts/migrate-database.sh

@@ -610,7 +610,8 @@ return them with their answer keys; the public course reads never do.
 8. Run [`supabase/006_assessment_fixes.sql`](./supabase/006_assessment_fixes.sql).
 9. Run [`supabase/007_lesson_blocks.sql`](./supabase/007_lesson_blocks.sql)
    and [`supabase/008_block_templates.sql`](./supabase/008_block_templates.sql)
-   to enable lesson blocks and block templates.
+   to enable lesson blocks and block templates. On the live project these
+   run by themselves once [Database migrations](#database-migrations) is set up.
 10. Copy the project URL, anon key, and service role key into `backend/.env`,
    and the URL and anon key into `frontend/.env`.
 11. Start the backend and verify `GET http://localhost:5000/api/status`.
@@ -629,6 +630,42 @@ creates assessment content and attempt records. The fifth makes answer keys
 and explanations available only to the backend service role, which calculates
 scores and enforces final-exam limits before returning feedback to learners.
 The sixth leaves completions and certificates to the backend too.
+
+
+### Database migrations
+
+New SQL files in `supabase/` run on the live database by themselves when they
+reach `main`. The GitHub workflow
+[`.github/workflows/database-migrations.yml`](./.github/workflows/database-migrations.yml)
+runs [`scripts/migrate-database.sh`](./scripts/migrate-database.sh), which:
+
+- runs each `supabase/NNN_name.sql` file once, in number order, and records
+  it in a `public.schema_migrations` table so it never runs again;
+- runs each file in one transaction, so a file that fails changes nothing
+  and stops the run (the workflow shows red in the Actions tab);
+- on its very first run, records `001` to `006` as already applied without
+  running them, because they were run by hand before. `001` adds sample
+  courses, which must not come back on the live site.
+
+Pushes that add no SQL file do not touch the database.
+
+**One-time setup** (needs admin access to the GitHub repository):
+
+1. In Supabase, open the project and click **Connect** at the top of the page.
+2. Under **Connection String**, choose **Session pooler**, not Direct
+   connection (GitHub cannot reach the direct address). Copy the URI. It
+   looks like
+   `postgresql://postgres.<project-ref>:[YOUR-PASSWORD]@aws-0-<region>.pooler.supabase.com:5432/postgres`.
+3. Replace `[YOUR-PASSWORD]` with the database password, including removing
+   the square brackets. If you do not know it, reset it under **Project
+   Settings > Database > Reset database password**, using only letters and
+   numbers. The site does not use this password, so resetting it is safe.
+4. In GitHub, open the repository's **Settings > Secrets and variables >
+   Actions** and click **New repository secret**. Name it `SUPABASE_DB_URL`,
+   paste the URI from step 3, and save.
+5. Open the **Actions** tab, choose **Database migrations**, and click **Run
+   workflow** on `main`, or simply merge a pull request that adds an SQL file.
+   The log lists each file as "Already applied" or "Applying".
 
 ### Assessment rules the backend enforces
 
