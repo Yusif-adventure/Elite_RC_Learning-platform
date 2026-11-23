@@ -9,6 +9,7 @@ export type LearnerQuestion = {
   choices: LearnerChoice[];
 };
 export type LearnerQuiz = { id: string; title: string; questions: LearnerQuestion[] };
+export type LearnerFinalExam = LearnerQuiz & { passMark: number };
 
 export type Attempt = {
   id: string;
@@ -31,6 +32,7 @@ export type AttemptResult = {
   attemptsRemaining: number | null;
   passed: boolean;
   review: ReviewItem[];
+  certificate?: { id: string; certificate_identifier: string; issued_at: string } | null;
 };
 
 export type AttemptHistory = {
