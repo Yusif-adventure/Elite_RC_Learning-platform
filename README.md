@@ -434,6 +434,11 @@ src/
 - [`supabase/006_assessment_fixes.sql`](./supabase/006_assessment_fixes.sql):
   sets the final-exam pass mark default to 80%, leaves completions and
   certificates to the backend, and hides final exams in draft courses.
+- [`supabase/007_lesson_blocks.sql`](./supabase/007_lesson_blocks.sql): the
+  list of blocks (text, images, videos, PDFs, HTML and arrange-the-lines
+  puzzles) stored with each lesson.
+- [`supabase/008_block_templates.sql`](./supabase/008_block_templates.sql):
+  reusable block templates shared by staff and instructors.
 
 ## Running the project
 
@@ -563,6 +568,25 @@ return them with their answer keys; the public course reads never do.
   80 when left out. Lesson quizzes need 10 to 25 questions and final exams 50. These rules also apply to the separate final exam routes.
 - If `supabase/004_assessments.sql` has not been run, courses still load and
   save, and saving one with a quiz explains which file to run.
+- Saving a course updates its lessons in place, so a lesson keeps its id, quiz
+  and learners' results when it is renamed or moved.
+
+### Lesson blocks
+
+- Each lesson can hold an ordered list of blocks: text (with headings, lists,
+  callouts, `inline code` and ```code blocks), images, YouTube videos that
+  play in the lesson, PDFs to read on the page or download, video files, HTML
+  with CSS and JavaScript, and arrange-the-lines puzzles.
+- HTML blocks run in a sandboxed frame without `allow-same-origin`, so they
+  cannot read the learner's sign-in, cookies or storage.
+- An HTML block can be saved as a template. Each `{{placeholder}}` becomes a
+  box to fill in, and scripts read the values from `BLOCK_DATA`. Lessons keep
+  their own copy, so changing a template never changes an existing lesson.
+- Lessons without blocks look exactly as before. Their slides, video and
+  YouTube link still show after any blocks.
+- If `supabase/007_lesson_blocks.sql` has not been run, courses still load and
+  save, and saving one with blocks explains which file to run. The same goes
+  for templates and `supabase/008_block_templates.sql`.
 
 ### Thursday release runbooks
 
@@ -584,10 +608,13 @@ return them with their answer keys; the public course reads never do.
 7. Run [`supabase/005_protect_answer_keys.sql`](./supabase/005_protect_answer_keys.sql).
    Without it, anyone with the public anon key can read quiz answer keys.
 8. Run [`supabase/006_assessment_fixes.sql`](./supabase/006_assessment_fixes.sql).
-9. Copy the project URL, anon key, and service role key into `backend/.env`,
+9. Run [`supabase/007_lesson_blocks.sql`](./supabase/007_lesson_blocks.sql)
+   and [`supabase/008_block_templates.sql`](./supabase/008_block_templates.sql)
+   to enable lesson blocks and block templates.
+10. Copy the project URL, anon key, and service role key into `backend/.env`,
    and the URL and anon key into `frontend/.env`.
-10. Start the backend and verify `GET http://localhost:5000/api/status`.
-11. Make at least one staff account (see [Staff access](#staff-access)).
+11. Start the backend and verify `GET http://localhost:5000/api/status`.
+12. Make at least one staff account (see [Staff access](#staff-access)).
 
 The first migration creates normalized course, objective, section, lesson, and
 resource tables. It also seeds two courses and creates public-read storage
