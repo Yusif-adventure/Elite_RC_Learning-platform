@@ -489,7 +489,7 @@ export function StaffOverview(props: StaffDashboardProps) {
           />
         </div>
         <div className="dash-columns">
-          <section className="panel">
+          <section className="panel course-panel">
             <div className="panel-head">
               <div>
                 <h2>Courses</h2>
