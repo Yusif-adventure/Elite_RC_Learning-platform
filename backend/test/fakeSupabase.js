@@ -41,6 +41,8 @@ const TABLE_RULES = {
   },
   // From supabase/003_lesson_progress.sql: deleting a course removes its progress.
   lesson_progress: { defaults: {}, parent: ["course_id", "courses"] },
+  // From supabase/008_block_templates.sql.
+  lesson_block_templates: { defaults: { description: "", fields: [], created_by: null }, parent: null, unique: ["name"] },
   quizzes: { defaults: { created_by: null }, parent: null },
   questions: { defaults: { explanation: null, position: 0 }, parent: ["quiz_id", "quizzes"] },
   answer_choices: { defaults: { is_correct: false, position: 0 }, parent: ["question_id", "questions"] },

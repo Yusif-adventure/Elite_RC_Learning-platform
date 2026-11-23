@@ -363,6 +363,29 @@ function optionalText(value, max) {
   return value === undefined || value === null || textOf(value, max) !== null;
 }
 
+// Placeholders in template HTML look like {{name}}.
+const TEMPLATE_FIELD_KEY = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+const MAX_TEMPLATE_FIELDS = 20;
+
+function templateFieldsProblem(fields) {
+  if (!Array.isArray(fields)) return "fields must be a list";
+  if (fields.length > MAX_TEMPLATE_FIELDS) return `can have up to ${MAX_TEMPLATE_FIELDS} fields`;
+  const keys = new Set();
+  for (const field of fields) {
+    if (!field || typeof field !== "object" || !TEMPLATE_FIELD_KEY.test(String(field.key || ""))) {
+      return "has a field whose name is not letters, numbers and _";
+    }
+    if (keys.has(field.key)) return `has the field "${field.key}" twice`;
+    keys.add(field.key);
+    if (!textOf(field.label, 80)?.trim()) return `field "${field.key}" needs a label of up to 80 characters`;
+  }
+  return null;
+}
+
+function cleanTemplateFields(fields) {
+  return fields.map(({ key, label }) => ({ key, label: label.trim() }));
+}
+
 const BLOCK_RULES = {
   text: {
     problem: (block) => (textOf(block.text, 20000)?.trim() ? null : "needs some text, up to 20,000 characters"),
@@ -397,6 +420,32 @@ const BLOCK_RULES = {
       return optionalText(block.title, 200) ? null : "title must be 200 characters or fewer";
     },
     keep: ({ html, title }) => ({ html, ...(title ? { title } : {}) }),
+  },
+  template: {
+    problem: (block) => {
+      if (!textOf(block.html, 100000)?.trim()) return "needs the template's HTML";
+      if (!optionalText(block.templateId, 64)) return "has a template id that is too long";
+      if (!textOf(block.templateName, 80)?.trim()) return "needs the template's name";
+      const fieldsProblem = templateFieldsProblem(block.fields);
+      if (fieldsProblem) return fieldsProblem;
+      const values = block.values ?? {};
+      if (typeof values !== "object" || Array.isArray(values)) return "values must be an object";
+      const keys = new Set(block.fields.map((field) => field.key));
+      for (const [key, value] of Object.entries(values)) {
+        if (!keys.has(key)) return `has a value for "${key}", which is not one of its fields`;
+        if (textOf(value, 5000) === null) return `value for "${key}" must be text of up to 5,000 characters`;
+      }
+      return null;
+    },
+    keep: ({ html, templateId, templateName, fields, values }) => ({
+      html,
+      ...(templateId ? { templateId } : {}),
+      templateName: templateName.trim(),
+      fields: cleanTemplateFields(fields),
+      values: Object.fromEntries(
+        cleanTemplateFields(fields).map(({ key }) => [key, typeof values?.[key] === "string" ? values[key] : ""]),
+      ),
+    }),
   },
   arrange: {
     problem: (block) => {
@@ -1722,6 +1771,117 @@ app.put("/api/staff/members/:id/role", requireStaff, async (req, res) => {
 });
 
 // Staff are checked before the file is read, so outsiders cannot send large bodies.
+// Reusable block templates (supabase/008_block_templates.sql), shared by
+// every staff and instructor account.
+const TEMPLATES_NOT_SET_UP =
+  "Block templates are not set up in the database yet. Run supabase/008_block_templates.sql in the Supabase SQL editor, then try again.";
+
+function toTemplate(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || "",
+    html: row.html,
+    fields: Array.isArray(row.fields) ? row.fields : [],
+    createdBy: row.created_by,
+    updatedAt: row.updated_at,
+  };
+}
+
+function templateProblem(input) {
+  if (!input || typeof input !== "object") return "A template is required.";
+  if (!textOf(input.name, 80)?.trim()) return "Give the template a name of up to 80 characters.";
+  if (!optionalText(input.description, 500)) return "The description must be 500 characters or fewer.";
+  if (!textOf(input.html, 100000)?.trim()) return "A template needs some HTML, up to 100,000 characters.";
+  const fieldsProblem = templateFieldsProblem(input.fields ?? []);
+  return fieldsProblem ? `The template ${fieldsProblem}.` : null;
+}
+
+function templateRow(input) {
+  return {
+    name: input.name.trim(),
+    description: (input.description || "").trim(),
+    html: input.html,
+    fields: cleanTemplateFields(input.fields ?? []),
+  };
+}
+
+function sendTemplateError(res, error) {
+  if (MISSING_TABLE_CODES.includes(error.code)) {
+    res.status(503).json({ error: TEMPLATES_NOT_SET_UP });
+  } else if (error.code === "23505") {
+    res.status(409).json({ error: "A template with this name already exists. Choose another name." });
+  } else if (error.code === "PGRST116" || error.code === "22P02") {
+    res.status(404).json({ error: "Template not found." });
+  } else {
+    res.status(500).json({ error: getErrorMessage(error) });
+  }
+}
+
+app.get("/api/staff/block-templates", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const { data, error } = await supabaseAdmin
+    .from("lesson_block_templates")
+    .select("*")
+    .order("name", { ascending: true });
+  if (error) {
+    sendTemplateError(res, error);
+    return;
+  }
+  // Sorted here too, so the order never depends on the database.
+  const templates = (data || []).map(toTemplate).sort((a, b) => a.name.localeCompare(b.name));
+  res.json({ templates });
+});
+
+app.post("/api/staff/block-templates", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const problem = templateProblem(req.body);
+  if (problem) {
+    res.status(400).json({ error: problem });
+    return;
+  }
+  const { data, error } = await supabaseAdmin
+    .from("lesson_block_templates")
+    .insert({ ...templateRow(req.body), created_by: req.user.id })
+    .select("*")
+    .single();
+  if (error) {
+    sendTemplateError(res, error);
+    return;
+  }
+  res.status(201).json({ template: toTemplate(data) });
+});
+
+app.put("/api/staff/block-templates/:id", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const problem = templateProblem(req.body);
+  if (problem) {
+    res.status(400).json({ error: problem });
+    return;
+  }
+  try {
+    await readSingleReference("lesson_block_templates", "id", req.params.id);
+    const { error } = await supabaseAdmin
+      .from("lesson_block_templates")
+      .update(templateRow(req.body))
+      .eq("id", req.params.id);
+    if (error) throw error;
+    res.json({ template: toTemplate(await readSingleReference("lesson_block_templates", "id", req.params.id)) });
+  } catch (error) {
+    sendTemplateError(res, error);
+  }
+});
+
+app.delete("/api/staff/block-templates/:id", requireStaff, async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const { error } = await supabaseAdmin.from("lesson_block_templates").delete().eq("id", req.params.id);
+  if (error) {
+    sendTemplateError(res, error);
+    return;
+  }
+  res.status(204).end();
+});
+
 app.post("/api/uploads", requireStaff, express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }), async (req, res) => {
   if (!requireSupabaseAdmin(res)) return;
   const kindName = String(req.query.kind || "");

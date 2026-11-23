@@ -1,6 +1,19 @@
 // Lesson blocks: the pieces an instructor stacks to build a lesson. The
 // backend checks the same rules in server.js (BLOCK_RULES).
 
+export type TemplateField = { key: string; label: string };
+
+// A reusable block: HTML with {{placeholders}} that are filled in each time
+// it is used. Shared by every staff and instructor account.
+export type BlockTemplate = {
+  id: string;
+  name: string;
+  description: string;
+  html: string;
+  fields: TemplateField[];
+  updatedAt?: string;
+};
+
 export type LessonBlock =
   | { id: string; type: "text"; text: string }
   | { id: string; type: "image"; url: string; alt: string; caption?: string }
@@ -8,7 +21,18 @@ export type LessonBlock =
   | { id: string; type: "pdf"; url: string; name: string }
   | { id: string; type: "video"; url: string; name: string }
   | { id: string; type: "html"; html: string; title?: string }
-  | { id: string; type: "arrange"; code: string; title?: string; instructions?: string };
+  | { id: string; type: "arrange"; code: string; title?: string; instructions?: string }
+  // A lesson keeps its own copy of the template, so later changes to the
+  // template never change this lesson until the instructor updates it.
+  | {
+      id: string;
+      type: "template";
+      templateId?: string;
+      templateName: string;
+      html: string;
+      fields: TemplateField[];
+      values: Record<string, string>;
+    };
 
 export type BlockType = LessonBlock["type"];
 
@@ -30,7 +54,7 @@ function newId() {
     : `block-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function newBlock(type: BlockType): LessonBlock {
+export function newBlock(type: Exclude<BlockType, "template">): LessonBlock {
   const id = newId();
   switch (type) {
     case "text":
@@ -129,7 +153,69 @@ export function blockProblem(block: LessonBlock): string {
       if (count < 2) return "An arrange-the-lines block needs at least 2 lines of code.";
       return count > MAX_ARRANGE_LINES ? `An arrange-the-lines block can have up to ${MAX_ARRANGE_LINES} lines.` : "";
     }
+    case "template":
+      return block.html.trim() ? "" : `The "${block.templateName}" template block has no code.`;
   }
+}
+
+const PLACEHOLDER = /\{\{\s*([A-Za-z][A-Za-z0-9_]{0,39})\s*\}\}/g;
+
+// "ledColour" and "led_colour" both become "Led colour".
+function labelFor(key: string) {
+  const words = key.replace(/_/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+// The {{placeholders}} in template HTML, in the order they first appear.
+// Labels already chosen for a placeholder are kept.
+export function templateFields(html: string, current: TemplateField[] = []): TemplateField[] {
+  const keys = [...new Set([...html.matchAll(PLACEHOLDER)].map((match) => match[1]))].slice(0, 20);
+  return keys.map((key) => current.find((field) => field.key === key) ?? { key, label: labelFor(key) });
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// JSON that is safe inside a <script> element.
+function scriptJson(value: unknown) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+// The template HTML with each {{placeholder}} replaced by its value, shown as
+// text. Scripts read the raw values from window.BLOCK_DATA.
+export function fillTemplate(html: string, fields: TemplateField[], values: Record<string, string>): string {
+  const data = Object.fromEntries(fields.map(({ key }) => [key, values[key] ?? ""]));
+  const filled = html.replace(PLACEHOLDER, (match, key: string) =>
+    Object.hasOwn(data, key) ? escapeHtml(data[key]) : match,
+  );
+  return `<script>window.BLOCK_DATA = ${scriptJson(data)};</script>
+${filled}`;
+}
+
+export function blockFromTemplate(template: BlockTemplate): LessonBlock {
+  return {
+    id: newId(),
+    type: "template",
+    templateId: template.id,
+    templateName: template.name,
+    html: template.html,
+    fields: template.fields,
+    values: Object.fromEntries(template.fields.map(({ key }) => [key, ""])),
+  };
+}
+
+// Whether a template has changed since this block copied it.
+export function templateChanged(block: Extract<LessonBlock, { type: "template" }>, template: BlockTemplate) {
+  return block.html !== template.html || JSON.stringify(block.fields) !== JSON.stringify(template.fields);
 }
 
 // Wraps instructor HTML for a sandboxed frame. The frame has no access to the

@@ -1489,3 +1489,97 @@ test("the public course reads never include quizzes or answer keys", async () =>
     assert.equal(JSON.stringify(publicCourse).includes("Ailerons"), false);
   }
 });
+
+const quizCardTemplate = {
+  name: "Quiz card",
+  description: "A flip card with a question and an answer.",
+  html: "<button>{{question}}</button><p hidden>{{answer}}</p>",
+  fields: [
+    { key: "question", label: "Question" },
+    { key: "answer", label: "Answer" },
+  ],
+};
+
+test("staff and instructors can save, list, change and delete block templates", async () => {
+  const created = await sendJson("POST", "/api/staff/block-templates", quizCardTemplate, { token: INSTRUCTOR_TOKEN });
+  assert.equal(created.status, 201);
+  const { template } = await created.json();
+  assert.equal(template.name, "Quiz card");
+  assert.equal(template.createdBy, instructorUser.id);
+  assert.deepEqual(template.fields, quizCardTemplate.fields);
+
+  await sendJson("POST", "/api/staff/block-templates", { ...quizCardTemplate, name: "Another" });
+  const listed = await (await staffGet("/api/staff/block-templates")).json();
+  assert.deepEqual(listed.templates.map((item) => item.name), ["Another", "Quiz card"]);
+
+  const changed = await sendJson("PUT", `/api/staff/block-templates/${template.id}`, {
+    ...quizCardTemplate,
+    html: "<b>{{question}}</b>",
+    fields: [{ key: "question", label: "The question" }],
+  });
+  assert.equal(changed.status, 200);
+  assert.equal((await changed.json()).template.html, "<b>{{question}}</b>");
+
+  assert.equal((await sendJson("DELETE", `/api/staff/block-templates/${template.id}`)).status, 204);
+  assert.deepEqual((await (await staffGet("/api/staff/block-templates")).json()).templates.map((item) => item.name), ["Another"]);
+});
+
+test("members cannot see or change block templates", async () => {
+  assert.equal((await staffGet("/api/staff/block-templates", { token: MEMBER_TOKEN })).status, 403);
+  await assertJsonError(await sendJson("POST", "/api/staff/block-templates", quizCardTemplate, { token: MEMBER_TOKEN }), 403);
+  assert.equal(fake.db.lesson_block_templates.length, 0);
+});
+
+const invalidTemplates = [
+  ["no name", { name: " " }],
+  ["no HTML", { html: "" }],
+  ["a field name with spaces", { fields: [{ key: "my field", label: "Field" }] }],
+  ["a repeated field", { fields: [{ key: "a", label: "A" }, { key: "a", label: "Again" }] }],
+  ["a field without a label", { fields: [{ key: "a", label: "" }] }],
+];
+
+for (const [description, overrides] of invalidTemplates) {
+  test(`a block template with ${description} is refused`, async () => {
+    await assertJsonError(await sendJson("POST", "/api/staff/block-templates", { ...quizCardTemplate, ...overrides }), 400);
+    assert.equal(fake.db.lesson_block_templates.length, 0);
+  });
+}
+
+test("two templates cannot share a name, and a missing template is not found", async () => {
+  await sendJson("POST", "/api/staff/block-templates", quizCardTemplate);
+  assert.match(await assertJsonError(await sendJson("POST", "/api/staff/block-templates", quizCardTemplate), 409), /name/);
+  await assertJsonError(await sendJson("PUT", `/api/staff/block-templates/${randomId()}`, quizCardTemplate), 404);
+});
+
+test("before the templates table is set up, templates say what to run", async () => {
+  fake.dropTable("lesson_block_templates");
+  assert.match(await assertJsonError(await staffGet("/api/staff/block-templates"), 503), /008_block_templates\.sql/);
+});
+
+test("a template block keeps its own copy of the template and only values for its fields", async () => {
+  const block = {
+    id: "q1",
+    type: "template",
+    templateId: randomId(),
+    templateName: "Quiz card",
+    html: quizCardTemplate.html,
+    fields: quizCardTemplate.fields,
+    values: { question: "What does pinMode do?" },
+  };
+  const created = await createCourse({
+    lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [block] }],
+  });
+  assert.deepEqual(created.lessonContent[0].blocks, [
+    { ...block, values: { question: "What does pinMode do?", answer: "" } },
+  ]);
+
+  const stray = await sendCourse(
+    "POST",
+    "/api/courses",
+    course({
+      title: "Stray",
+      lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ ...block, values: { other: "x" } }] }],
+    }),
+  );
+  assert.match(await assertJsonError(stray, 400), /other/);
+});

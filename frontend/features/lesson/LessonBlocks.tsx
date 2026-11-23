@@ -4,6 +4,7 @@ import {
   FRAME_MESSAGE,
   arrangeLines,
   checkOrder,
+  fillTemplate,
   framedHtml,
   moveItem,
   shuffleLines,
@@ -52,6 +53,8 @@ export function LessonBlockView({ block }: { block: LessonBlock }) {
       );
     case "html":
       return <SandboxedHtml html={block.html} title={block.title || "Interactive activity"} />;
+    case "template":
+      return <SandboxedHtml html={fillTemplate(block.html, block.fields, block.values)} title={block.templateName} />;
     case "arrange":
       return <ArrangeLines code={block.code} title={block.title} instructions={block.instructions} />;
   }

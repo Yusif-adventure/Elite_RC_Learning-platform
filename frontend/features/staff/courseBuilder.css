@@ -924,3 +924,26 @@
     grid-template-columns: 1fr;
   }
 }
+
+.block-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.block-template-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.template-saver {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px dashed var(--blue);
+  border-radius: 10px;
+  background: var(--sky);
+}

@@ -1,10 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CATEGORY_NAMES } from "../../categories";
-import { uploadFile, type UploadKind } from "./courseApi";
+import {
+  deleteBlockTemplate,
+  fetchBlockTemplates,
+  saveBlockTemplate,
+  uploadFile,
+  type TemplateInput,
+  type UploadKind,
+} from "./courseApi";
 import { Field, FileField, FileRow, FormIcon, RemoveButton } from "./formParts";
 import { QuizEditor, type QuizChange } from "./QuizEditor";
-import { LessonBlocksEditor } from "./BlockEditor";
-import { blockProblem, type LessonBlock } from "../lesson/blocks";
+import { LessonBlocksEditor, type TemplateLibrary } from "./BlockEditor";
+import { blockProblem, type BlockTemplate, type LessonBlock } from "../lesson/blocks";
 import {
   emptyFinalExam,
   emptyQuiz,
@@ -269,6 +276,35 @@ export function CourseBuilderPage({
   const [uploadsInProgress, setUploadsInProgress] = useState(0);
   const [error, setError] = useState("");
   const [showProblems, setShowProblems] = useState(false);
+  const [templateList, setTemplateList] = useState<BlockTemplate[]>([]);
+  const [templateError, setTemplateError] = useState("");
+
+  // The shared block templates, loaded once for every lesson in the form.
+  useEffect(() => {
+    let active = true;
+    fetchBlockTemplates()
+      .then((list) => active && setTemplateList(list))
+      .catch((loadError: unknown) => active && setTemplateError(getErrorMessage(loadError)));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const templates: TemplateLibrary = {
+    list: templateList,
+    error: templateError,
+    save: async (template: TemplateInput, id?: string) => {
+      const saved = await saveBlockTemplate(template, id);
+      setTemplateList((current) =>
+        [...current.filter((item) => item.id !== saved.id), saved].sort((a, b) => a.name.localeCompare(b.name)),
+      );
+      return saved;
+    },
+    remove: async (template: BlockTemplate) => {
+      await deleteBlockTemplate(template.id);
+      setTemplateList((current) => current.filter((item) => item.id !== template.id));
+    },
+  };
 
   const allLessons = sections.flatMap((section) => section.lessons);
   const titledLessons = allLessons.filter((lesson) => lesson.title.trim());
@@ -743,6 +779,7 @@ export function CourseBuilderPage({
                         blocks={lesson.blocks}
                         showProblems={showProblems}
                         uploadFiles={uploadFiles}
+                        templates={templates}
                         onChange={(change) =>
                           updateLesson(lesson.id, (current) => ({ blocks: change(current.blocks) }))
                         }

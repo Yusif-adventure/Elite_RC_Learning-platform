@@ -331,4 +331,8 @@
   .arrange-actions .btn {
     flex: 1 1 auto;
   }
+
+  .arrange-code code {
+    font-size: 13px;
+  }
 }
