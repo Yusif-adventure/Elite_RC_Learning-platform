@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { CATEGORY_NAMES } from "../../categories";
 import {
   deleteBlockTemplate,
@@ -26,7 +26,7 @@ import {
   type FinalExamDraft,
   type QuizDraft,
 } from "./quizDrafts";
-import { StaffButton, StaffShell } from "./StaffPages";
+import { StaffAccountContext, StaffButton, StaffShell } from "./StaffPages";
 import type {
   CourseResource,
   StaffCourse,
@@ -260,9 +260,13 @@ export function CourseBuilderPage({
   );
   const [category, setCategory] = useState(editingCourse?.category ?? "");
   const [duration, setDuration] = useState(editingCourse?.duration ?? "");
-  const [instructor, setInstructor] = useState(editingCourse?.instructor ?? "");
+  const account = useContext(StaffAccountContext);
+  // A new course starts with the signed-in instructor's name and photo.
+  const [instructor, setInstructor] = useState(
+    editingCourse ? editingCourse.instructor : account?.name ?? "",
+  );
   const [instructorImage, setInstructorImage] = useState(
-    editingCourse?.instructorImage ?? "",
+    editingCourse ? editingCourse.instructorImage ?? "" : account?.photo ?? "",
   );
   const [courseImage, setCourseImage] = useState(editingCourse?.image ?? "");
   const [learningPoints, setLearningPoints] = useState<string[]>(
@@ -846,6 +850,15 @@ export function CourseBuilderPage({
                     if (uploaded) setInstructorImage(uploaded[0].url);
                   }}
                 >
+                  {account?.photo && instructorImage !== account.photo && (
+                    <button
+                      type="button"
+                      className="form-add"
+                      onClick={() => setInstructorImage(account.photo ?? "")}
+                    >
+                      Use my profile photo
+                    </button>
+                  )}
                   {instructorImage && (
                     <div className="image-preview round">
                       <img
