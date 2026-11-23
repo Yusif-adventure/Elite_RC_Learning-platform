@@ -11,6 +11,8 @@ import {
 import { Field, FileField, FileRow, FormIcon, RemoveButton } from "./formParts";
 import { QuizEditor, type QuizChange } from "./QuizEditor";
 import { LessonBlocksEditor, type TemplateLibrary } from "./BlockEditor";
+import { LessonFullPage } from "./LessonFullPage";
+import { LessonPreview } from "./LessonPreview";
 import { blockProblem, type BlockTemplate, type LessonBlock } from "../lesson/blocks";
 import {
   emptyFinalExam,
@@ -277,6 +279,8 @@ export function CourseBuilderPage({
   const [error, setError] = useState("");
   const [showProblems, setShowProblems] = useState(false);
   const [templateList, setTemplateList] = useState<BlockTemplate[]>([]);
+  // The lesson open in the full-page editor, if any.
+  const [fullPageLessonId, setFullPageLessonId] = useState<number | null>(null);
   const [templateError, setTemplateError] = useState("");
 
   // The shared block templates, loaded once for every lesson in the form.
@@ -462,6 +466,193 @@ export function CourseBuilderPage({
     }
     setSections((current) => current.filter((item) => item.id !== section.id));
   };
+
+  // A lesson's fields, shown in its card and in the full-page editor.
+  const renderLessonFields = (lesson: LessonDraft, lessonIndex: number) => (
+    <>
+          <Field label={`Lesson ${lessonIndex + 1} title`} required>
+            <input
+              className={
+                showProblems &&
+                !lesson.title.trim() &&
+                lessonHasContent(lesson)
+                  ? "invalid"
+                  : undefined
+              }
+              value={lesson.title}
+              onChange={(event) => {
+                const value = event.target.value;
+                updateLesson(lesson.id, () => ({ title: value }));
+              }}
+              placeholder="e.g. Binding your transmitter"
+            />
+          </Field>
+          <LessonBlocksEditor
+            blocks={lesson.blocks}
+            showProblems={showProblems}
+            uploadFiles={uploadFiles}
+            templates={templates}
+            onChange={(change) =>
+              updateLesson(lesson.id, (current) => ({ blocks: change(current.blocks) }))
+            }
+          />
+          <div className="form-row two">
+            <FileField
+              label="Slides"
+              hint="PDF, PPT, PPTX or Keynote, up to 20 MB each"
+              accept=".pdf,.ppt,.pptx,.key"
+              multiple
+              onFiles={async (files) => {
+                const uploaded = await uploadFiles(
+                  files,
+                  "slide",
+                  MAX_SLIDE_BYTES,
+                  "Slide file",
+                );
+                if (uploaded) {
+                  updateLesson(lesson.id, (current) => ({
+                    slides: [...current.slides, ...uploaded],
+                  }));
+                }
+              }}
+            >
+              {lesson.slides.map((slide, slideIndex) => (
+                <FileRow
+                  key={slide.url}
+                  file={slide}
+                  onRemove={() =>
+                    updateLesson(lesson.id, (current) => ({
+                      slides: current.slides.filter(
+                        (_, index) => index !== slideIndex,
+                      ),
+                    }))
+                  }
+                />
+              ))}
+            </FileField>
+            <FileField
+              label="Short video preview"
+              hint="MP4 plays best, up to 50 MB"
+              accept=".mp4,.webm,.mov"
+              replacing={Boolean(lesson.video)}
+              onFiles={async (files) => {
+                const uploaded = await uploadFiles(
+                  files,
+                  "video",
+                  MAX_VIDEO_BYTES,
+                  "Video preview",
+                );
+                if (uploaded)
+                  updateLesson(lesson.id, () => ({
+                    video: uploaded[0],
+                  }));
+              }}
+            >
+              {lesson.video && (
+                <>
+                  <video
+                    className="form-video"
+                    controls
+                    preload="metadata"
+                    src={lesson.video.url}
+                  />
+                  <FileRow
+                    file={lesson.video}
+                    onRemove={() =>
+                      updateLesson(lesson.id, () => ({
+                        video: undefined,
+                      }))
+                    }
+                  />
+                </>
+              )}
+            </FileField>
+          </div>
+          <Field
+            label="Full video on YouTube"
+            hint="Learners watch the short preview first, then open this link for the full lesson."
+          >
+            <input
+              className={
+                showProblems && lessonHasBadLink(lesson)
+                  ? "invalid"
+                  : undefined
+              }
+              type="url"
+              value={lesson.youtubeUrl}
+              onChange={(event) => {
+                const value = event.target.value;
+                updateLesson(lesson.id, () => ({
+                  youtubeUrl: value,
+                }));
+              }}
+              placeholder="https://www.youtube.com/watch?v=..."
+            />
+          </Field>
+          {lesson.quiz ? (
+            <div className="lesson-quiz">
+              <div className="form-group-head">
+                <b>Lesson quiz</b>
+                <RemoveButton onClick={() => removeLessonQuiz(lesson)}>
+                  Remove quiz
+                </RemoveButton>
+              </div>
+              <small className="quiz-hint">
+                Learners take it after this lesson and can retake it as
+                often as they like.
+              </small>
+              <QuizEditor
+                quiz={lesson.quiz}
+                kind="lesson"
+                showProblems={showProblems}
+                onChange={(change) => changeLessonQuiz(lesson.id, change)}
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="form-add"
+              onClick={() =>
+                updateLesson(lesson.id, () => ({ quiz: emptyQuiz() }))
+              }
+            >
+              + Add a quiz to this lesson
+            </button>
+          )}
+    </>
+  );
+
+  const fullPage = (() => {
+    if (fullPageLessonId === null) return null;
+    const sectionIndex = sections.findIndex((section) =>
+      section.lessons.some((lesson) => lesson.id === fullPageLessonId),
+    );
+    if (sectionIndex < 0) return null;
+    const section = sections[sectionIndex];
+    const lessonIndex = section.lessons.findIndex((lesson) => lesson.id === fullPageLessonId);
+    const lesson = section.lessons[lessonIndex];
+    return (
+      <LessonFullPage
+        label={`${section.title.trim() || `Section ${sectionIndex + 1}`} · Lesson ${lessonIndex + 1}`}
+        title={lesson.title}
+        onClose={() => setFullPageLessonId(null)}
+        editor={<div className="lesson-builder-card lesson-fullpage-card">{renderLessonFields(lesson, lessonIndex)}</div>}
+        preview={
+          <LessonPreview
+            courseTitle={title}
+            section={section.title}
+            lessonNumber={sections.slice(0, sectionIndex).reduce((count, item) => count + item.lessons.length, 0) + lessonIndex + 1}
+            title={lesson.title}
+            blocks={lesson.blocks}
+            slides={lesson.slides}
+            video={lesson.video}
+            youtubeUrl={lesson.youtubeUrl}
+            quiz={lesson.quiz}
+          />
+        }
+      />
+    );
+  })();
 
   const buildCourse = (): StaffCourse => {
     const lessonTitles = titledLessons.map((lesson) => lesson.title.trim());
@@ -754,159 +945,20 @@ export function CourseBuilderPage({
                     <div className="lesson-builder-card" key={lesson.id}>
                       <div className="form-group-head">
                         <b>Lesson {lessonIndex + 1}</b>
-                        <RemoveButton onClick={() => removeLesson(lesson)}>
-                          Remove lesson
-                        </RemoveButton>
+                        <span className="lesson-card-tools">
+                          <button
+                            type="button"
+                            className="form-add"
+                            onClick={() => setFullPageLessonId(lesson.id)}
+                          >
+                            Open full page
+                          </button>
+                          <RemoveButton onClick={() => removeLesson(lesson)}>
+                            Remove lesson
+                          </RemoveButton>
+                        </span>
                       </div>
-                      <Field label={`Lesson ${lessonIndex + 1} title`} required>
-                        <input
-                          className={
-                            showProblems &&
-                            !lesson.title.trim() &&
-                            lessonHasContent(lesson)
-                              ? "invalid"
-                              : undefined
-                          }
-                          value={lesson.title}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            updateLesson(lesson.id, () => ({ title: value }));
-                          }}
-                          placeholder="e.g. Binding your transmitter"
-                        />
-                      </Field>
-                      <LessonBlocksEditor
-                        blocks={lesson.blocks}
-                        showProblems={showProblems}
-                        uploadFiles={uploadFiles}
-                        templates={templates}
-                        onChange={(change) =>
-                          updateLesson(lesson.id, (current) => ({ blocks: change(current.blocks) }))
-                        }
-                      />
-                      <div className="form-row two">
-                        <FileField
-                          label="Slides"
-                          hint="PDF, PPT, PPTX or Keynote, up to 20 MB each"
-                          accept=".pdf,.ppt,.pptx,.key"
-                          multiple
-                          onFiles={async (files) => {
-                            const uploaded = await uploadFiles(
-                              files,
-                              "slide",
-                              MAX_SLIDE_BYTES,
-                              "Slide file",
-                            );
-                            if (uploaded) {
-                              updateLesson(lesson.id, (current) => ({
-                                slides: [...current.slides, ...uploaded],
-                              }));
-                            }
-                          }}
-                        >
-                          {lesson.slides.map((slide, slideIndex) => (
-                            <FileRow
-                              key={slide.url}
-                              file={slide}
-                              onRemove={() =>
-                                updateLesson(lesson.id, (current) => ({
-                                  slides: current.slides.filter(
-                                    (_, index) => index !== slideIndex,
-                                  ),
-                                }))
-                              }
-                            />
-                          ))}
-                        </FileField>
-                        <FileField
-                          label="Short video preview"
-                          hint="MP4 plays best, up to 50 MB"
-                          accept=".mp4,.webm,.mov"
-                          replacing={Boolean(lesson.video)}
-                          onFiles={async (files) => {
-                            const uploaded = await uploadFiles(
-                              files,
-                              "video",
-                              MAX_VIDEO_BYTES,
-                              "Video preview",
-                            );
-                            if (uploaded)
-                              updateLesson(lesson.id, () => ({
-                                video: uploaded[0],
-                              }));
-                          }}
-                        >
-                          {lesson.video && (
-                            <>
-                              <video
-                                className="form-video"
-                                controls
-                                preload="metadata"
-                                src={lesson.video.url}
-                              />
-                              <FileRow
-                                file={lesson.video}
-                                onRemove={() =>
-                                  updateLesson(lesson.id, () => ({
-                                    video: undefined,
-                                  }))
-                                }
-                              />
-                            </>
-                          )}
-                        </FileField>
-                      </div>
-                      <Field
-                        label="Full video on YouTube"
-                        hint="Learners watch the short preview first, then open this link for the full lesson."
-                      >
-                        <input
-                          className={
-                            showProblems && lessonHasBadLink(lesson)
-                              ? "invalid"
-                              : undefined
-                          }
-                          type="url"
-                          value={lesson.youtubeUrl}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            updateLesson(lesson.id, () => ({
-                              youtubeUrl: value,
-                            }));
-                          }}
-                          placeholder="https://www.youtube.com/watch?v=..."
-                        />
-                      </Field>
-                      {lesson.quiz ? (
-                        <div className="lesson-quiz">
-                          <div className="form-group-head">
-                            <b>Lesson quiz</b>
-                            <RemoveButton onClick={() => removeLessonQuiz(lesson)}>
-                              Remove quiz
-                            </RemoveButton>
-                          </div>
-                          <small className="quiz-hint">
-                            Learners take it after this lesson and can retake it as
-                            often as they like.
-                          </small>
-                          <QuizEditor
-                            quiz={lesson.quiz}
-                            kind="lesson"
-                            showProblems={showProblems}
-                            onChange={(change) => changeLessonQuiz(lesson.id, change)}
-                          />
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="form-add"
-                          onClick={() =>
-                            updateLesson(lesson.id, () => ({ quiz: emptyQuiz() }))
-                          }
-                        >
-                          + Add a quiz to this lesson
-                        </button>
-                      )}
+                      {renderLessonFields(lesson, lessonIndex)}
                     </div>
                   ))}
                   <button
@@ -1067,6 +1119,7 @@ export function CourseBuilderPage({
           )}
         </aside>
       </div>
+      {fullPage}
     </StaffShell>
   );
 }
