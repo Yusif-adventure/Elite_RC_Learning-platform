@@ -22,6 +22,7 @@ import { ConfirmDialog, errorText, useToast } from "./features/staff/Feedback";
 import { useStaffData } from "./features/staff/useStaffData";
 import { withoutAssessments } from "./features/staff/quizDrafts";
 import { LessonQuiz } from "./features/quiz/LessonQuiz";
+import { PdfResource } from "./features/lesson/PdfResource";
 import type { Member, Role } from "./staffStats";
 import { supabase } from "./supabaseClient";
 import {
@@ -1418,7 +1419,7 @@ function Lesson({
   const slideCount = lesson?.slides.length ?? 0;
   const included: [IconName, string][] = [];
   if (slideCount) {
-    included.push(["file", `${slideCount} slide ${slideCount === 1 ? "file" : "files"} to open or download`]);
+    included.push(["file", `${slideCount} slide ${slideCount === 1 ? "file" : "files"} to read on the page or download`]);
   }
   if (lesson?.video) included.push(["video", "A short video preview"]);
   if (lesson?.youtubeUrl) included.push(["play", "The full lesson video on YouTube"]);
@@ -1492,17 +1493,7 @@ function Lesson({
                   <b>Slides</b>
                   {lesson?.slides.map((slide) => {
                     const resource = asResource(slide);
-                    return (
-                      <a
-                        href={resource.url}
-                        download={resource.name}
-                        target="_blank"
-                        rel="noreferrer"
-                        key={resource.url}
-                      >
-                        {resource.name} · Open slides
-                      </a>
-                    );
+                    return <PdfResource file={resource} key={resource.url} />;
                   })}
                 </div>
               ) : null}

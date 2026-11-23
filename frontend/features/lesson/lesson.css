@@ -1,0 +1,88 @@
+/* Lesson files and lesson blocks. Uses the tokens in index.css, full 1px
+   borders, 44px touch targets, and one column at 760px and below. */
+
+.file-resource {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.file-resource-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.file-resource-name {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: var(--navy);
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.file-resource-name b {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.file-resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lesson-resource .file-resource .btn,
+.file-resource .btn {
+  min-height: 44px;
+  padding: 0 14px;
+  color: var(--navy);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.file-resource-frame {
+  width: 100%;
+  height: min(75vh, 760px);
+  min-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.file-resource-note,
+.lesson-resource .file-resource-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lesson-resource .file-resource-note a,
+.file-resource-note a {
+  color: var(--blue);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+@media (max-width: 760px) {
+  .file-resource-actions,
+  .file-resource-actions .btn {
+    width: 100%;
+  }
+
+  .file-resource-actions .btn {
+    flex: 1 1 0;
+  }
+
+  .file-resource-frame {
+    min-height: 360px;
+  }
+}
