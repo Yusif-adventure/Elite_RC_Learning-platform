@@ -1907,6 +1907,38 @@ app.delete("/api/staff/block-templates/:id", requireStaff, async (req, res) => {
   res.status(204).end();
 });
 
+// Any signed-in member can upload a photo of themselves for their profile.
+// It is stored under their own id; the browser then saves the link in the
+// account's user_metadata.avatar_url.
+const PROFILE_PHOTO_BYTES = 5 * MEGABYTE;
+
+app.post("/api/profile/photo", requireUser, express.raw({ type: () => true, limit: PROFILE_PHOTO_BYTES }), async (req, res) => {
+  if (!requireSupabaseAdmin(res)) return;
+  const name = String(req.query.name || "").split(/[\\/]/).pop().trim();
+  const extension = extname(name).toLowerCase();
+  if (!Object.hasOwn(imageTypes, extension)) {
+    res.status(400).json({ error: `A profile photo must be one of these file types: ${Object.keys(imageTypes).join(", ")}.` });
+    return;
+  }
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    res.status(400).json({ error: "That photo is empty." });
+    return;
+  }
+  if (req.body.length > PROFILE_PHOTO_BYTES) {
+    res.status(413).json({ error: "A profile photo must be 5 MB or smaller." });
+    return;
+  }
+  const path = `profiles/${req.user.id}/${randomUUID()}${extension}`;
+  try {
+    const bucket = supabaseAdmin.storage.from("instructor-images");
+    const { error } = await bucket.upload(path, req.body, { contentType: imageTypes[extension] });
+    if (error) throw error;
+    res.status(201).json({ url: bucket.getPublicUrl(path).data.publicUrl });
+  } catch (error) {
+    res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
 app.post("/api/uploads", requireStaff, express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }), async (req, res) => {
   if (!requireSupabaseAdmin(res)) return;
   const kindName = String(req.query.kind || "");

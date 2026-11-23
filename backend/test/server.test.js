@@ -1611,3 +1611,28 @@ test("a template block keeps its own copy of the template and only values for it
   );
   assert.match(await assertJsonError(stray, 400), /other/);
 });
+
+function uploadProfilePhoto(name, size = 10, { token = MEMBER_TOKEN } = {}) {
+  return fetch(`${api}/api/profile/photo?${new URLSearchParams({ name })}`, {
+    method: "POST",
+    headers: signedIn(token, { "Content-Type": "application/octet-stream" }),
+    body: Buffer.alloc(size, 7),
+  });
+}
+
+test("a member can upload a profile photo, stored under their own id", async () => {
+  const response = await uploadProfilePhoto("me.jpg");
+  assert.equal(response.status, 201);
+  const { url } = await response.json();
+  const path = decodeURIComponent(new URL(url).pathname.split("/object/public/")[1]);
+  assert.match(path, new RegExp(`^instructor-images/profiles/${memberUser.id}/[0-9a-f-]+\.jpg$`));
+  assert.equal((await fetch(url)).status, 200);
+});
+
+test("profile photos must be images up to 5 MB, from a signed-in account", async () => {
+  await assertJsonError(await uploadProfilePhoto("me.svg"), 400);
+  await assertJsonError(await uploadProfilePhoto("me.png", 0), 400);
+  await assertJsonError(await uploadProfilePhoto("me.png", 5 * MEGABYTE + 1), 413);
+  await assertJsonError(await uploadProfilePhoto("me.png", 10, { token: null }), 401);
+  assert.equal(fake.files.size, 0);
+});

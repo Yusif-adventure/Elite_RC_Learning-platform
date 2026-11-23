@@ -13,6 +13,7 @@ import { CourseBuilderPage } from "./features/staff/CourseBuilderPage";
 import type { CourseResource, StaffCourse } from "./features/staff/StaffPages";
 import {
   API_URL,
+  uploadProfilePhoto,
   createCourse,
   removeCourse,
   setMemberRole,
@@ -23,6 +24,8 @@ import { useStaffData } from "./features/staff/useStaffData";
 import { withoutAssessments } from "./features/staff/quizDrafts";
 import { LessonQuiz } from "./features/quiz/LessonQuiz";
 import { LessonResources } from "./features/lesson/LessonResources";
+import { Avatar } from "./Avatar";
+import { accountPhoto } from "./accountPhoto";
 import { LessonBlocks } from "./features/lesson/LessonBlocks";
 import { FinalExamPanel } from "./features/quiz/FinalExamPanel";
 import { CertificateVerification } from "./features/quiz/CertificateVerification";
@@ -1231,7 +1234,7 @@ function AppShell({
           )}
         </nav>
         <div className="side-user">
-          <span>{memberInitials(user)}</span>
+          <span><Avatar photo={accountPhoto(user)} initials={memberInitials(user)} /></span>
           <div>
             <b>{memberName(user)}</b>
             <small>{roleLabel(user)}</small>
@@ -1248,7 +1251,7 @@ function AppShell({
             Signed in as {user.email}
           </div>
           <button className="top-profile" onClick={() => go("profile")}>
-            <span>{memberInitials(user)}</span>
+            <span><Avatar photo={accountPhoto(user)} initials={memberInitials(user)} /></span>
             <Icon name="chevron" size={16} />
           </button>
         </header>
@@ -2039,6 +2042,31 @@ function ProfilePage({
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [passwordState, setPasswordState] = useState({ busy: false, error: "", done: "" });
+  const [photoState, setPhotoState] = useState({ busy: false, error: "", done: "" });
+  const photo = accountPhoto(user);
+
+  // The new photo reaches the rest of the app through Supabase's USER_UPDATED event.
+  const savePhoto = async (avatarUrl: string | null, done: string) => {
+    const { error } = await supabase.auth.updateUser({ data: { avatar_url: avatarUrl } });
+    setPhotoState(error ? { busy: false, error: error.message, done: "" } : { busy: false, error: "", done });
+  };
+  const uploadPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setPhotoState({ busy: false, error: "Choose a photo up to 5 MB.", done: "" });
+      return;
+    }
+    setPhotoState({ busy: true, error: "", done: "" });
+    try {
+      await savePhoto(await uploadProfilePhoto(file), "Your photo has been saved.");
+    } catch (error) {
+      setPhotoState({ busy: false, error: errorText(error, "Your photo could not be saved. Please try again."), done: "" });
+    }
+  };
+  const removePhoto = async () => {
+    setPhotoState({ busy: true, error: "", done: "" });
+    await savePhoto(null, "Your photo has been removed.");
+  };
 
   const saveName = async () => {
     const name = fullName.trim();
@@ -2082,18 +2110,45 @@ function ProfilePage({
         <div>
           <span className="eyebrow">ACCOUNT</span>
           <h1>Your profile</h1>
-          <p>Update your name and password.</p>
+          <p>Update your photo, name and password.</p>
         </div>
       </div>
       <section className="panel profile-panel">
         <div className="profile-cover" />
         <div className="profile-main">
-          <span className="profile-avatar">{memberInitials(user)}</span>
+          <span className="profile-avatar">
+            <Avatar photo={photo} initials={memberInitials(user)} />
+          </span>
           <div>
             <h2>{memberName(user)}</h2>
             <p>
               {roleLabel(user)} · {user.email}
             </p>
+            <div className="profile-photo-actions">
+              <label className={`btn outline profile-photo-pick${photoState.busy ? " busy" : ""}`}>
+                <input
+                  type="file"
+                  accept=".png,.jpg,.jpeg,.webp,.gif"
+                  disabled={photoState.busy}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    void uploadPhoto(file);
+                  }}
+                />
+                <span>{photoState.busy ? "Saving..." : photo ? "Change photo" : "Add a photo"}</span>
+              </label>
+              {photo && (
+                <button type="button" className="text-link" disabled={photoState.busy} onClick={() => void removePhoto()}>
+                  Remove photo
+                </button>
+              )}
+              {(photoState.error || photoState.done) && (
+                <small role={photoState.error ? "alert" : "status"} className={photoState.error ? "form-error" : undefined}>
+                  {photoState.error || photoState.done}
+                </small>
+              )}
+            </div>
           </div>
           <Button variant="outline" onClick={onSignOut}>
             Sign out
@@ -2596,6 +2651,7 @@ export default function App() {
     id: user.id,
     name: memberName(user),
     initials: memberInitials(user),
+    photo: accountPhoto(user),
     role: user.app_metadata?.role === "instructor" ? ("instructor" as const) : ("staff" as const),
     onViewSite: () => go("home"),
     onSignOut: () => void signOut(),

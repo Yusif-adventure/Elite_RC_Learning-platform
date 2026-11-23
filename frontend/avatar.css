@@ -1,0 +1,54 @@
+/* A profile photo inside the round avatar spots. */
+.avatar-photo {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.side-user > span,
+.top-profile span,
+.profile-avatar,
+.member-avatar {
+  overflow: hidden;
+}
+
+.profile-avatar {
+  background-clip: padding-box;
+}
+
+.profile-photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 12px;
+}
+
+.profile-photo-pick {
+  position: relative;
+  cursor: pointer;
+}
+
+.profile-photo-pick input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.profile-photo-pick:focus-within {
+  outline: 3px solid rgba(19, 113, 232, 0.22);
+  outline-offset: 2px;
+}
+
+.profile-photo-pick.busy {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.profile-photo-actions small {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 13px;
+}

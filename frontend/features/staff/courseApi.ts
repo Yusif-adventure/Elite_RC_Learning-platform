@@ -109,3 +109,15 @@ export async function saveBlockTemplate(template: TemplateInput, id?: string): P
 export async function deleteBlockTemplate(id: string) {
   await send(`/api/staff/block-templates/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+
+// A photo of the signed-in member for their profile. Returns its web link,
+// which the profile page saves in the account's user_metadata.avatar_url.
+export async function uploadProfilePhoto(file: File): Promise<string> {
+  const response = await send(`/api/profile/photo?${new URLSearchParams({ name: file.name })}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: file,
+  });
+  const payload: { url: string } = await response.json();
+  return payload.url;
+}
