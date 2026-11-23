@@ -17,7 +17,7 @@ import {
 } from "../lesson/blocks";
 import { LessonBlockView } from "../lesson/LessonBlocks";
 import type { TemplateInput, UploadKind } from "./courseApi";
-import { Field, FileField, FileRow, RemoveButton } from "./formParts";
+import { Field, FileField, FileRow, ImageLinkField, RemoveButton } from "./formParts";
 import type { CourseResource } from "./StaffPages";
 
 const MEGABYTE = 1024 * 1024;
@@ -245,6 +245,7 @@ function BlockCard({
                   if (uploaded) onUpdate({ url: uploaded[0].url });
                 }}
               >
+                <ImageLinkField onUse={(url) => onUpdate({ url })} />
                 {block.url && <img className="block-image-preview" src={block.url} alt="" />}
               </FileField>
               <Field label="Describe the picture" required hint="Read out to learners who cannot see it.">

@@ -16,6 +16,7 @@ import {
   type StaffProgressRow,
 } from "../../staffStats";
 import { ConfirmDialog } from "./Feedback";
+import { Avatar } from "../../Avatar";
 import type { LessonBlock } from "../lesson/blocks";
 import type { StaffDataStatus } from "./useStaffData";
 import type { SavedFinalExam, SavedQuiz } from "./quizDrafts";
@@ -28,6 +29,8 @@ export type StaffAccount = {
   id: string;
   name: string;
   initials: string;
+  // The account's profile photo, if it has one.
+  photo?: string;
   role: "staff" | "instructor";
   onViewSite: () => void;
   onSignOut: () => void;
@@ -207,7 +210,7 @@ export function StaffShell({
               </button>
             </nav>
             <div className="side-user">
-              <span>{account.initials}</span>
+              <span><Avatar photo={account.photo} initials={account.initials} /></span>
               <div>
                 <b>{account.name}</b>
                 <small>{ROLE_LABELS[account.role]}</small>
@@ -242,7 +245,7 @@ export function StaffShell({
             title={account?.name}
             aria-label={account ? `${account.name}, staff overview` : "Staff overview"}
           >
-            <span>{account?.initials}</span>
+            <span>{account && <Avatar photo={account.photo} initials={account.initials} />}</span>
           </button>
         </header>
         <main className="workspace-main">{children}</main>
@@ -489,7 +492,7 @@ export function StaffOverview(props: StaffDashboardProps) {
           />
         </div>
         <div className="dash-columns">
-          <section className="panel">
+          <section className="panel course-panel">
             <div className="panel-head">
               <div>
                 <h2>Courses</h2>

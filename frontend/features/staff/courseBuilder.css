@@ -947,3 +947,230 @@
   border-radius: 10px;
   background: var(--sky);
 }
+
+/* One lesson across the whole screen, with a learner preview */
+
+.lesson-card-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.lesson-fullpage {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--bg);
+}
+
+.lesson-fullpage-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 10px max(16px, 3vw);
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.lesson-fullpage-back {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--navy);
+  background: #fff;
+  font-weight: 700;
+}
+
+.lesson-fullpage-name {
+  min-width: 0;
+}
+
+.lesson-fullpage-name small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.lesson-fullpage-name h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--navy);
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lesson-fullpage-name h2:focus {
+  outline: none;
+}
+
+.lesson-fullpage-modes {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: #eef3f8;
+}
+
+.lesson-fullpage-modes button {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: none;
+  font-weight: 700;
+}
+
+.lesson-fullpage-modes button[aria-pressed="true"] {
+  color: var(--navy);
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(8, 35, 71, 0.12);
+}
+
+.lesson-fullpage-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.course-form.lesson-fullpage-editor,
+.lesson-fullpage-preview {
+  display: block;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 24px max(16px, 3vw) 48px;
+}
+
+.course-form .lesson-fullpage-card {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.lesson-fullpage-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+  padding: 18px 20px;
+  border: 1px dashed var(--blue);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.lesson-fullpage-end p {
+  flex: 1 1 220px;
+  margin: 0;
+  color: var(--navy);
+  font-weight: 600;
+}
+
+.lesson-fullpage-banner {
+  margin: 0 0 20px;
+  padding: 12px 16px;
+  border: 1px solid var(--blue);
+  border-radius: 10px;
+  color: var(--navy);
+  background: var(--sky);
+  font-size: 14px;
+}
+
+.lesson-preview.lesson-content {
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.lesson-preview-note {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.lesson-preview-quiz ol {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.lesson-preview-question {
+  margin: 0 0 6px;
+  color: var(--navy);
+  font-weight: 700;
+}
+
+.lesson-preview-quiz ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.lesson-preview-quiz li.is-correct em {
+  color: var(--green);
+  font-style: normal;
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .lesson-fullpage-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .lesson-fullpage-name {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .course-form .lesson-fullpage-card {
+    padding: 14px;
+  }
+}
+
+/* Paste an image link instead of uploading */
+
+.image-link-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.image-link-row {
+  display: flex;
+  gap: 6px;
+}
+
+.course-form .image-link-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.image-link-field small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.image-link-field .image-link-error {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.image-link-row .block-tool {
+  flex: none;
+  white-space: nowrap;
+}

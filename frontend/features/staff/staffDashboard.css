@@ -182,7 +182,7 @@
 /* Layout */
 .dash-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 330px;
+  grid-template-columns: minmax(0, 1fr) clamp(260px, 24vw, 330px);
   gap: 22px;
   align-items: start;
 }
@@ -231,7 +231,8 @@
 }
 .segmented {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex: none;
+  flex-wrap: nowrap;
   gap: 2px;
   padding: 3px;
   border-radius: 10px;
@@ -246,6 +247,7 @@
   background: none;
   font-size: 13px;
   font-weight: 700;
+  white-space: nowrap;
 }
 .segmented button.active {
   color: var(--navy);
@@ -657,12 +659,6 @@
   .dash-columns {
     grid-template-columns: 1fr;
   }
-  .course-row {
-    grid-template-columns: 70px minmax(0, 1fr) 150px;
-  }
-  .course-row-actions {
-    grid-column: 2 / -1;
-  }
 }
 @media (max-width: 1100px) {
   .stat-grid {
@@ -760,5 +756,34 @@
   }
   .lesson-bar {
     grid-template-columns: minmax(0, 1fr) 80px 24px;
+  }
+}
+
+/* The course list follows the width of its own panel. On a laptop the panel
+   sits beside the menu and the activity column, so it is far narrower than
+   the window, and a window-width rule would squeeze four columns into it. */
+.course-panel {
+  container: course-list / inline-size;
+}
+@container course-list (max-width: 860px) {
+  .course-row {
+    grid-template-columns: 70px minmax(0, 1fr) minmax(130px, 170px);
+  }
+  .course-row-actions {
+    grid-column: 2 / -1;
+    flex-wrap: wrap;
+  }
+}
+@container course-list (max-width: 520px) {
+  .course-row {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+  .course-row img {
+    width: 56px;
+    height: 44px;
+  }
+  .course-row-stats,
+  .course-row-actions {
+    grid-column: 1 / -1;
   }
 }

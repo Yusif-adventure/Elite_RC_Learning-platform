@@ -29,12 +29,7 @@ export function LessonBlockView({ block }: { block: LessonBlock }) {
     case "text":
       return <RichText className="lesson-block" text={block.text} />;
     case "image":
-      return (
-        <figure className="lesson-block lesson-image">
-          <img src={block.url} alt={block.alt} loading="lazy" />
-          {block.caption && <figcaption>{block.caption}</figcaption>}
-        </figure>
-      );
+      return <LessonImage url={block.url} alt={block.alt} caption={block.caption} />;
     case "youtube":
       return <YouTubeBlock url={block.url} title={block.title} />;
     case "pdf":
@@ -58,6 +53,24 @@ export function LessonBlockView({ block }: { block: LessonBlock }) {
     case "arrange":
       return <ArrangeLines code={block.code} title={block.title} instructions={block.instructions} />;
   }
+}
+
+// Pictures can be linked from other sites, so one that stops loading shows
+// its description in a box instead of a broken image.
+function LessonImage({ url, alt, caption }: { url: string; alt: string; caption?: string }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <figure className="lesson-block lesson-image">
+      {failed ? (
+        <div className="lesson-image-missing" role="img" aria-label={alt}>
+          Picture unavailable: {alt}
+        </div>
+      ) : (
+        <img src={url} alt={alt} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+      )}
+      {caption && <figcaption>{caption}</figcaption>}
+    </figure>
+  );
 }
 
 function YouTubeBlock({ url, title }: { url: string; title?: string }) {

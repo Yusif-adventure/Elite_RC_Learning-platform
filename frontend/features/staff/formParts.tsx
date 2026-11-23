@@ -1,5 +1,6 @@
 import { useState, type DragEvent, type ReactNode } from "react";
 import type { CourseResource } from "./StaffPages";
+import { imageLinkProblem, imageLoads } from "./imageLink";
 
 // Small pieces shared by the course builder and its quiz editor.
 
@@ -181,6 +182,76 @@ export function FileRow({
       <RemoveButton label={`Remove ${file.name}`} onClick={onRemove}>
         <FormIcon name="close" size={16} />
       </RemoveButton>
+    </div>
+  );
+}
+
+// Adds a picture by pasting its link, as an alternative to uploading. The
+// link must be https and must load as a picture before it is used.
+export function ImageLinkField({
+  label = "Or paste an image link",
+  onUse,
+}: {
+  label?: string;
+  onUse: (url: string) => void;
+}) {
+  const [value, setValue] = useState("");
+  const [state, setState] = useState<{ checking: boolean; error: string }>({ checking: false, error: "" });
+
+  const use = async () => {
+    const link = value.trim();
+    const problem = imageLinkProblem(link);
+    if (problem) {
+      setState({ checking: false, error: problem });
+      return;
+    }
+    setState({ checking: true, error: "" });
+    if (!(await imageLoads(link))) {
+      setState({
+        checking: false,
+        error: "That link did not load as a picture. Check it opens an image on its own, or upload the file instead.",
+      });
+      return;
+    }
+    setState({ checking: false, error: "" });
+    setValue("");
+    onUse(link);
+  };
+
+  return (
+    <div className="image-link-field">
+      <span className="field-name">{label}</span>
+      <div className="image-link-row">
+        <input
+          type="url"
+          inputMode="url"
+          value={value}
+          className={state.error ? "invalid" : undefined}
+          aria-invalid={Boolean(state.error)}
+          aria-label={label}
+          onChange={(event) => {
+            setValue(event.target.value);
+            setState({ checking: false, error: "" });
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void use();
+            }
+          }}
+          placeholder="https://images.unsplash.com/..."
+        />
+        <button type="button" className="block-tool" disabled={state.checking || !value.trim()} onClick={() => void use()}>
+          {state.checking ? "Checking..." : "Use link"}
+        </button>
+      </div>
+      {state.error ? (
+        <small className="image-link-error" role="alert">
+          {state.error}
+        </small>
+      ) : (
+        <small>Only use pictures you have permission to use. Linked pictures can disappear, so upload anything important.</small>
+      )}
     </div>
   );
 }
