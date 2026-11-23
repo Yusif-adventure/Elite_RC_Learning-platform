@@ -27,6 +27,8 @@ import { LessonQuiz } from "./features/quiz/LessonQuiz";
 import { LessonResources } from "./features/lesson/LessonResources";
 import { Avatar } from "./Avatar";
 import { descriptionText } from "./courseText";
+import { coursesTaughtBy, instructorPhoto, splitInstructors } from "./instructors";
+import "./instructorPage.css";
 import "./courseText.css";
 import { accountPhoto } from "./accountPhoto";
 import { LessonBlocks } from "./features/lesson/LessonBlocks";
@@ -507,6 +509,31 @@ function go(page: Page, course?: Course, lessonIndex?: number) {
   navigateTo(routeFor(page, course, lessonIndex));
 }
 
+// Each instructor's name links to their page. Clicks stay on the name, so a
+// name inside a clickable course card opens the instructor, not the course.
+function InstructorNames({ names }: { names: string }) {
+  const list = splitInstructors(names);
+  return (
+    <>
+      {list.map((name, index) => (
+        <span key={name}>
+          {index > 0 && ", "}
+          <button
+            type="button"
+            className="instructor-link"
+            onClick={(event) => {
+              event.stopPropagation();
+              navigateTo({ page: "instructor-profile", name });
+            }}
+          >
+            {name}
+          </button>
+        </span>
+      ))}
+    </>
+  );
+}
+
 function PublicHeader({
   active,
   user,
@@ -576,7 +603,9 @@ function CourseCard({ course, index = 0 }: { course: Course; index?: number }) {
         <div className="course-meta">
           <span>
             <Icon name="user" size={15} />
-            {course.instructor}
+            <span className="instructor-names">
+              <InstructorNames names={course.instructor} />
+            </span>
           </span>
           <span>
             <Icon name="book" size={15} />
@@ -1059,7 +1088,9 @@ function CourseDetails({
               />
               <div>
                 <small>COURSE INSTRUCTOR</small>
-                <b>{course.instructor}</b>
+                <b>
+                  <InstructorNames names={course.instructor} />
+                </b>
               </div>
             </div>
             {progress && (
@@ -1517,6 +1548,11 @@ function Lesson({
           {lessonIndex + 1}
         </span>
         <h1>{title}</h1>
+        {course.instructor && (
+          <p className="lesson-teacher">
+            Taught by <InstructorNames names={course.instructor} />
+          </p>
+        )}
         <p className="lead">
           {started
             ? "Work through the resources below at your own pace."
@@ -2227,6 +2263,90 @@ function ProfileSettings({
   );
 }
 
+// A public page for one instructor: who they are and every lesson they teach.
+function InstructorPage({
+  name,
+  user,
+  onSignOut,
+}: {
+  name: string;
+  user?: User | null;
+  onSignOut?: () => void;
+}) {
+  const taught = coursesTaughtBy(name, courses);
+  // Show the name as the courses spell it, whatever the letter case in the link.
+  const shownName =
+    taught.flatMap((course) => splitInstructors(course.instructor)).find(
+      (other) => other.toLowerCase() === name.trim().toLowerCase(),
+    ) ?? name;
+  const lessonTotal = taught.reduce((total, course) => total + lessonCount(course), 0);
+
+  return (
+    <>
+      <PublicHeader user={user} onSignOut={onSignOut} />
+      <main className="details instructor-page">
+        <button className="crumb" onClick={() => go("explore")}>
+          Explore Courses / Instructors / <b>{shownName}</b>
+        </button>
+        <section className="instructor-hero">
+          <img {...personImageProps(instructorPhoto(shownName, taught))} alt="" className="instructor-hero-photo" />
+          <div>
+            <span className="eyebrow">INSTRUCTOR</span>
+            <h1>{shownName}</h1>
+            <p>
+              {taught.length
+                ? `Teaches ${taught.length} ${taught.length === 1 ? "course" : "courses"} and ${lessonTotal} ${lessonTotal === 1 ? "lesson" : "lessons"} on Elite RC.`
+                : "No published courses yet. Check back soon!"}
+            </p>
+          </div>
+        </section>
+        {taught.length === 0 ? (
+          <Button onClick={() => go("explore")}>
+            Explore all courses <Icon name="arrow" size={16} />
+          </Button>
+        ) : (
+          <div className="instructor-courses">
+            {taught.map((course) => {
+              const lessons = course.lessonContent ?? [];
+              return (
+                <article className="instructor-course" key={course.id ?? course.title}>
+                  <button type="button" className="instructor-course-head" onClick={() => go("course", course)}>
+                    <img {...courseImageProps(course.image)} alt="" />
+                    <span>
+                      <span className="category">
+                        {course.category} · {course.level}
+                      </span>
+                      <b>{course.title}</b>
+                      <small>{descriptionText(course.desc)}</small>
+                    </span>
+                  </button>
+                  {lessons.length > 0 && (
+                    <ol className="instructor-lessons">
+                      {lessons.map((lesson, index) => (
+                        <li key={`${lesson.section}-${lesson.title}`}>
+                          <button type="button" onClick={() => go("lesson", course, index)}>
+                            <span className="instructor-lesson-number">{index + 1}</span>
+                            <span>
+                              <b>{lesson.title}</b>
+                              <small>{lesson.section}</small>
+                            </span>
+                            <Icon name="arrow" size={16} />
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </main>
+      <Footer />
+    </>
+  );
+}
+
 function ProfilePage({
   user,
   onSignOut,
@@ -2328,6 +2448,7 @@ function pageTitle(route: Route, course?: Course) {
     instructor: "Instructor workspace",
     members: "Members",
     "staff-profile": "Your profile",
+    "instructor-profile": route.page === "instructor-profile" ? route.name : "Instructor",
     builder: course ? `Edit ${course.title}` : "New course",
     "not-found": "Page not found",
   };
@@ -2720,6 +2841,9 @@ export default function App() {
       break;
     case "terms":
       content = <TermsOfServicePage user={user} onSignOut={signOut} />;
+      break;
+    case "instructor-profile":
+      content = <InstructorPage name={route.name} user={user} onSignOut={signOut} />;
       break;
     case "explore":
       content = (
