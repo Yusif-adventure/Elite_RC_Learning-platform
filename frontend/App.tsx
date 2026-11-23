@@ -22,7 +22,7 @@ import { ConfirmDialog, errorText, useToast } from "./features/staff/Feedback";
 import { useStaffData } from "./features/staff/useStaffData";
 import { withoutAssessments } from "./features/staff/quizDrafts";
 import { LessonQuiz } from "./features/quiz/LessonQuiz";
-import { PdfResource } from "./features/lesson/PdfResource";
+import { LessonResources } from "./features/lesson/LessonResources";
 import { LessonBlocks } from "./features/lesson/LessonBlocks";
 import { FinalExamPanel } from "./features/quiz/FinalExamPanel";
 import { CertificateVerification } from "./features/quiz/CertificateVerification";
@@ -469,12 +469,6 @@ function getFeaturedCourses() {
         list.findIndex((item) => item.title === course.title) === index,
     )
     .slice(0, 3);
-}
-
-function asResource(resource: CourseResource | string): CourseResource {
-  return typeof resource === "string"
-    ? { name: resource, url: resource }
-    : resource;
 }
 
 function normalizeLink(value: string) {
@@ -1540,42 +1534,7 @@ function Lesson({
           {started ? (
             <>
               <h2>Lesson resources</h2>
-              {slideCount ? (
-                <div className="lesson-resource">
-                  <b>Slides</b>
-                  {lesson?.slides.map((slide) => {
-                    const resource = asResource(slide);
-                    return <PdfResource file={resource} key={resource.url} />;
-                  })}
-                </div>
-              ) : null}
-              {lesson?.video ? (
-                <div className="lesson-resource">
-                  <b>Short video preview</b>
-                  {typeof lesson.video === "string" ? (
-                    <a href={lesson.video} target="_blank" rel="noreferrer">
-                      Open preview clip
-                    </a>
-                  ) : (
-                    <video controls preload="metadata" src={lesson.video.url}>
-                      Your browser does not support video playback.
-                    </video>
-                  )}
-                </div>
-              ) : null}
-              {lesson?.youtubeUrl ? (
-                <div className="lesson-resource">
-                  <b>Full lesson video</b>
-                  <a
-                    className="full-video-link"
-                    href={normalizeLink(lesson.youtubeUrl)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Watch the full video on YouTube
-                  </a>
-                </div>
-              ) : null}
+              <LessonResources slides={lesson?.slides} video={lesson?.video} youtubeUrl={lesson?.youtubeUrl} />
               {included.length === 0 && (
                 <p>The instructor has not added files or videos to this lesson yet.</p>
               )}
