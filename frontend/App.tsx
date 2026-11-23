@@ -26,6 +26,8 @@ import { withoutAssessments } from "./features/staff/quizDrafts";
 import { LessonQuiz } from "./features/quiz/LessonQuiz";
 import { LessonResources } from "./features/lesson/LessonResources";
 import { Avatar } from "./Avatar";
+import { descriptionText } from "./courseText";
+import "./courseText.css";
 import { accountPhoto } from "./accountPhoto";
 import { LessonBlocks } from "./features/lesson/LessonBlocks";
 import { FinalExamPanel } from "./features/quiz/FinalExamPanel";
@@ -570,7 +572,7 @@ function CourseCard({ course, index = 0 }: { course: Course; index?: number }) {
       <div className="course-body">
         <span className="category">{course.category}</span>
         <h3>{course.title}</h3>
-        <p>{course.desc}</p>
+        <p>{descriptionText(course.desc)}</p>
         <div className="course-meta">
           <span>
             <Icon name="user" size={15} />
@@ -1048,7 +1050,7 @@ function CourseDetails({
               {course.level.toUpperCase()} • {course.category.toUpperCase()}
             </span>
             <h1>{course.title}</h1>
-            <p>{course.desc}</p>
+            <p className="course-description">{descriptionText(course.desc)}</p>
             <div className="instructor">
               <img
                 {...personImageProps(course.instructorImage)}
@@ -1344,7 +1346,7 @@ function Dashboard({
           <div>
             <span className="badge">START HERE</span>
             <h2>{featured.title}</h2>
-            <p>{featured.desc}</p>
+            <p>{descriptionText(featured.desc)}</p>
             <small>
               {lessonCount(featured)} lessons · {featured.duration}
             </small>

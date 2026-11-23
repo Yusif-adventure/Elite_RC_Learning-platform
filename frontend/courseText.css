@@ -1,0 +1,6 @@
+
+/* Course descriptions keep their line breaks and tabs on the course page. */
+.course-description {
+  white-space: pre-wrap;
+  tab-size: 4;
+}

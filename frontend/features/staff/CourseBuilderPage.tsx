@@ -1,5 +1,6 @@
 import { useContext, useEffect, useState } from "react";
 import { CATEGORY_NAMES } from "../../categories";
+import { descriptionText } from "../../courseText";
 import {
   deleteBlockTemplate,
   fetchBlockTemplates,
@@ -212,7 +213,7 @@ function CoursePreview({
           <span className="category">{category || "Category"}</span>
           <h3>{title.trim() || "Your course title"}</h3>
           <p>
-            {description.trim() ||
+            {descriptionText(description).trim() ||
               "A short description of what learners will achieve."}
           </p>
           <div className="course-meta">
@@ -756,7 +757,10 @@ export function CourseBuilderPage({
                   required
                 />
               </Field>
-              <Field label="Short description">
+              <Field
+                label="Short description"
+                hint="Press Enter for a new line, or type \n for a new line and \t for a tab."
+              >
                 <textarea
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
