@@ -16,6 +16,7 @@ import {
   type StaffProgressRow,
 } from "../../staffStats";
 import { ConfirmDialog } from "./Feedback";
+import type { LessonBlock } from "../lesson/blocks";
 import type { StaffDataStatus } from "./useStaffData";
 import type { SavedFinalExam, SavedQuiz } from "./quizDrafts";
 import "./staffDashboard.css";
@@ -61,6 +62,9 @@ export type StaffCourse = {
     slides: CourseResource[];
     video?: CourseResource;
     youtubeUrl?: string;
+    // Text, images, videos, PDFs, HTML and activities, in order. Left out
+    // for lessons made before blocks existed.
+    blocks?: LessonBlock[];
     // Staff reads include the quiz with its answer key; null removes it on save.
     quiz?: SavedQuiz | null;
   }[];

@@ -1,8 +1,10 @@
-import { useState, type DragEvent, type ReactNode } from "react";
+import { useState } from "react";
 import { CATEGORY_NAMES } from "../../categories";
 import { uploadFile, type UploadKind } from "./courseApi";
-import { Field, FormIcon, RemoveButton } from "./formParts";
+import { Field, FileField, FileRow, FormIcon, RemoveButton } from "./formParts";
 import { QuizEditor, type QuizChange } from "./QuizEditor";
+import { LessonBlocksEditor } from "./BlockEditor";
+import { blockProblem, type LessonBlock } from "../lesson/blocks";
 import {
   emptyFinalExam,
   emptyQuiz,
@@ -43,6 +45,7 @@ type LessonDraft = {
   slides: CourseResource[];
   video?: CourseResource;
   youtubeUrl: string;
+  blocks: LessonBlock[];
   quiz: QuizDraft | null;
 };
 
@@ -65,6 +68,7 @@ function emptyLesson(): LessonDraft {
     slides: [],
     video: undefined,
     youtubeUrl: "",
+    blocks: [],
     quiz: null,
   };
 }
@@ -88,6 +92,7 @@ function draftsFromCourse(course: StaffCourse): SectionDraft[] {
         slides: lesson.slides,
         video: lesson.video,
         youtubeUrl: lesson.youtubeUrl ?? "",
+        blocks: lesson.blocks ?? [],
         quiz: lesson.quiz ? quizDraftFrom(lesson.quiz) : null,
       })),
   }));
@@ -113,6 +118,7 @@ function lessonHasContent(lesson: LessonDraft) {
     lesson.slides.length ||
     lesson.video ||
     lesson.youtubeUrl.trim() ||
+    lesson.blocks.length ||
     lesson.quiz,
   );
 }
@@ -154,109 +160,6 @@ function FormStep({
         <h2>{title}</h2>
         <p>{description}</p>
       </div>
-    </div>
-  );
-}
-
-function FileField({
-  label,
-  hint,
-  accept,
-  multiple = false,
-  replacing = false,
-  onFiles,
-  children,
-}: {
-  label: string;
-  hint: string;
-  accept: string;
-  multiple?: boolean;
-  replacing?: boolean;
-  onFiles: (files: File[]) => Promise<void>;
-  children?: ReactNode;
-}) {
-  const [dragging, setDragging] = useState(false);
-  const [uploading, setUploading] = useState(false);
-
-  const takeFiles = async (files: File[]) => {
-    if (!files.length) return;
-    setUploading(true);
-    try {
-      await onFiles(multiple ? files : files.slice(0, 1));
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
-    event.preventDefault();
-    setDragging(false);
-    void takeFiles(Array.from(event.dataTransfer.files));
-  };
-
-  return (
-    <div className="file-field">
-      <label
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={handleDrop}
-      >
-        <span className="field-name">{label}</span>
-        <input
-          className="file-input"
-          type="file"
-          accept={accept}
-          multiple={multiple}
-          onChange={(event) => {
-            const files = Array.from(event.target.files ?? []);
-            // Clearing the input lets staff pick the same file again after a failure.
-            event.target.value = "";
-            void takeFiles(files);
-          }}
-        />
-        <span
-          className={`file-drop${dragging ? " dragging" : ""}${uploading ? " uploading" : ""}`}
-        >
-          <span className="file-drop-icon">
-            <FormIcon name="upload" />
-          </span>
-          <span>
-            {uploading ? (
-              "Uploading..."
-            ) : (
-              <>
-                Drag {replacing ? "a new file" : multiple ? "files" : "a file"}{" "}
-                here or <u>browse</u>
-              </>
-            )}
-          </span>
-          <small>{hint}</small>
-        </span>
-      </label>
-      {children}
-    </div>
-  );
-}
-
-function FileRow({
-  file,
-  onRemove,
-}: {
-  file: CourseResource;
-  onRemove: () => void;
-}) {
-  return (
-    <div className="file-row">
-      <FormIcon name="file" />
-      <a href={file.url} target="_blank" rel="noreferrer">
-        {file.name}
-      </a>
-      <RemoveButton label={`Remove ${file.name}`} onClick={onRemove}>
-        <FormIcon name="close" size={16} />
-      </RemoveButton>
     </div>
   );
 }
@@ -403,10 +306,16 @@ export function CourseBuilderPage({
         (lesson) => !lesson.title.trim() && lessonHasContent(lesson),
       )
     ) {
-      return "Give every lesson that has files, a video or a quiz a title before saving.";
+      return "Give every lesson that has content, files, a video or a quiz a title before saving.";
     }
     if (allLessons.some(lessonHasBadLink)) {
       return "Use a full YouTube link for each lesson video, like https://www.youtube.com/watch?v=...";
+    }
+    for (const lesson of allLessons) {
+      for (const block of lesson.blocks) {
+        const problem = blockProblem(block);
+        if (problem) return `Lesson "${lesson.title.trim()}": ${problem}`;
+      }
     }
     for (const lesson of allLessons) {
       const problem = lesson.quiz && quizProblem(lesson.quiz, lessonQuizName(lesson));
@@ -545,6 +454,7 @@ export function CourseBuilderPage({
             youtubeUrl: lesson.youtubeUrl.trim()
               ? normalizeLink(lesson.youtubeUrl)
               : undefined,
+            blocks: lesson.blocks,
             // null removes a quiz the lesson had before.
             quiz: lesson.quiz ? quizFromDraft(lesson.quiz) : null,
           })),
@@ -829,6 +739,14 @@ export function CourseBuilderPage({
                           placeholder="e.g. Binding your transmitter"
                         />
                       </Field>
+                      <LessonBlocksEditor
+                        blocks={lesson.blocks}
+                        showProblems={showProblems}
+                        uploadFiles={uploadFiles}
+                        onChange={(change) =>
+                          updateLesson(lesson.id, (current) => ({ blocks: change(current.blocks) }))
+                        }
+                      />
                       <div className="form-row two">
                         <FileField
                           label="Slides"

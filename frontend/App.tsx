@@ -23,6 +23,7 @@ import { useStaffData } from "./features/staff/useStaffData";
 import { withoutAssessments } from "./features/staff/quizDrafts";
 import { LessonQuiz } from "./features/quiz/LessonQuiz";
 import { PdfResource } from "./features/lesson/PdfResource";
+import { LessonBlocks } from "./features/lesson/LessonBlocks";
 import type { Member, Role } from "./staffStats";
 import { supabase } from "./supabaseClient";
 import {
@@ -1417,12 +1418,16 @@ function Lesson({
   const nextTitle =
     nextIndex === undefined ? undefined : course.lessonContent?.[nextIndex]?.title;
   const slideCount = lesson?.slides.length ?? 0;
+  const blocks = lesson?.blocks ?? [];
   const included: [IconName, string][] = [];
+  if (blocks.length) included.push(["book", "Lesson notes and activities"]);
   if (slideCount) {
     included.push(["file", `${slideCount} slide ${slideCount === 1 ? "file" : "files"} to read on the page or download`]);
   }
   if (lesson?.video) included.push(["video", "A short video preview"]);
   if (lesson?.youtubeUrl) included.push(["play", "The full lesson video on YouTube"]);
+  // Files and videos added the original way, before lessons had blocks.
+  const hasResources = Boolean(slideCount || lesson?.video || lesson?.youtubeUrl);
 
   const completesLesson = Boolean(tracking && !tracking.done);
   // Saves the lesson as complete (when tracking) before moving on.
@@ -1484,6 +1489,12 @@ function Lesson({
             </button>
           </p>
         )}
+        {started && blocks.length > 0 && (
+          <article className="content-card lesson-blocks-card">
+            <LessonBlocks blocks={blocks} />
+          </article>
+        )}
+        {(!started || hasResources || !blocks.length) && (
         <article className="content-card">
           {started ? (
             <>
@@ -1563,6 +1574,7 @@ function Lesson({
             </>
           )}
         </article>
+        )}
         {/* The quiz follows the lesson, once it has been started or completed. */}
         {signedIn && lesson?.id && (started || tracking?.done) && <LessonQuiz lessonId={lesson.id} />}
         <nav className="lesson-nav" aria-label="Lessons">

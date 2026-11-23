@@ -4,7 +4,7 @@ import type { CourseResource, StaffCourse } from "./StaffPages";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
-export type UploadKind = "course-image" | "instructor-image" | "slide" | "video";
+export type UploadKind = "course-image" | "instructor-image" | "slide" | "video" | "lesson-image" | "lesson-pdf";
 
 // The backend only accepts changes from a signed-in staff account.
 async function withSignIn(headers: Record<string, string>) {

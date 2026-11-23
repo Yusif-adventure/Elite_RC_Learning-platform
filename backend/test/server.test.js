@@ -314,6 +314,18 @@ const invalidCourses = [
     "a YouTube link that is not a web link",
     { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], youtubeUrl: "javascript:alert(1)" }] },
   ],
+  ["blocks that are not a list", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: "text" }] }],
+  ["a block of an unknown type", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "script", text: "x" }] }] }],
+  ["a block with no id", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ type: "text", text: "Hello" }] }] }],
+  ["two blocks with the same id", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "text", text: "1" }, { id: "a", type: "text", text: "2" }] }] }],
+  ["an empty text block", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "text", text: "  " }] }] }],
+  ["an image block with no description", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "image", url: "https://example.com/a.png", alt: "" }] }] }],
+  ["an image block that is not a web link", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "image", url: "javascript:alert(1)", alt: "A board" }] }] }],
+  ["a YouTube block with another site's link", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "youtube", url: "https://example.com/watch?v=abc" }] }] }],
+  ["a PDF block that is not a web link", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "pdf", name: "a.pdf", url: "file:///a.pdf" }] }] }],
+  ["an empty HTML block", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "html", html: "" }] }] }],
+  ["an arrange block with one line", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "arrange", code: "void setup() {}\n\n" }] }] }],
+  ["too many blocks", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: Array.from({ length: 61 }, (_, index) => ({ id: String(index), type: "text", text: "Hi" })) }] }],
 ];
 
 for (const [description, overrides] of invalidCourses) {
@@ -434,7 +446,7 @@ test("deleting a course removes it and everything inside it", async () => {
 });
 
 test("a request body that is too big returns a clear error", async () => {
-  const response = await sendCourse("POST", "/api/courses", course({ desc: "x".repeat(MEGABYTE + 1) }));
+  const response = await sendCourse("POST", "/api/courses", course({ desc: "x".repeat(5 * MEGABYTE + 1) }));
 
   await assertJsonError(response, 413);
 });
@@ -461,6 +473,8 @@ const uploadCases = [
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   ],
   ["video", "preview.mp4", "lesson-resources", "video/mp4"],
+  ["lesson-image", "wiring.png", "lesson-resources", "image/png"],
+  ["lesson-pdf", "exercise sheet.pdf", "lesson-resources", "application/pdf"],
 ];
 
 for (const [kind, name, bucket, contentType] of uploadCases) {
@@ -503,6 +517,8 @@ const refusedUploads = [
   ["instructor-image", "photo"],
   ["slide", "program.exe"],
   ["video", "still.png"],
+  ["lesson-pdf", "slides.pptx"],
+  ["lesson-image", "diagram.svg"],
   ["unknown", "photo.png"],
   ["constructor", "photo.png"],
   ["course-image", ""],
@@ -967,6 +983,68 @@ test("saving a course keeps its lesson quizzes and their attempts", async () => 
   assert.equal(reloaded.id, quiz.id);
   assert.equal(fake.db.assessment_attempts.length, 1);
   assert.equal((await loadLessonQuiz(saved.lessonContent[1].id)).status, 404);
+});
+
+const everyBlock = [
+  { id: "t1", type: "text", text: "# Blink\nMake the **LED** flash." },
+  { id: "i1", type: "image", url: "https://example.com/uno.png", alt: "An Arduino Uno", caption: "The board" },
+  { id: "y1", type: "youtube", url: "https://youtu.be/abc123", title: "Blink in 5 minutes" },
+  { id: "p1", type: "pdf", name: "sheet.pdf", url: "https://example.com/sheet.pdf" },
+  { id: "v1", type: "video", name: "clip.mp4", url: "https://example.com/clip.mp4" },
+  { id: "h1", type: "html", html: "<button>Press me</button><script>1</script>", title: "Button" },
+  { id: "a1", type: "arrange", code: "void setup() {\n  pinMode(13, OUTPUT);\n}", title: "Order it", instructions: "Drag the lines." },
+];
+
+test("lesson blocks are saved and read back in order", async () => {
+  const created = await createCourse({
+    lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: everyBlock }],
+  });
+  assert.deepEqual(created.lessonContent[0].blocks, everyBlock);
+  assert.deepEqual((await readCourse(created.id)).lessonContent[0].blocks, everyBlock);
+});
+
+test("only the fields a block needs are stored", async () => {
+  const created = await createCourse({
+    lessonContent: [
+      { title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "t1", type: "text", text: "Hi", secret: "x", url: "y" }] },
+    ],
+  });
+  assert.deepEqual(created.lessonContent[0].blocks, [{ id: "t1", type: "text", text: "Hi" }]);
+});
+
+test("a lesson with no blocks reads as it always has, and blocks can be removed", async () => {
+  const created = await createCourse({
+    lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: everyBlock }],
+  });
+  const response = await sendCourse(
+    "PUT",
+    `/api/courses/${created.id}`,
+    course({ lessonContent: [{ ...created.lessonContent[0], blocks: [] }] }),
+  );
+  assert.equal(response.status, 200);
+  const [lesson] = (await readCourse(created.id)).lessonContent;
+  assert.equal("blocks" in lesson, false);
+  assert.equal(lesson.id, created.lessonContent[0].id);
+});
+
+test("before the blocks column is set up, courses still load and save, and adding blocks says what to run", async () => {
+  const created = await createCourse();
+  fake.dropColumn("course_lessons.blocks");
+
+  assert.equal((await fetch(`${api}/api/courses`)).status, 200);
+  assert.equal((await readCourse(created.id)).title, created.title);
+  assert.equal((await staffGet("/api/staff/courses")).status, 200);
+  const edited = await sendCourse("PUT", `/api/courses/${created.id}`, course({ desc: "Updated" }));
+  assert.equal(edited.status, 200);
+  assert.equal((await readCourse(created.id)).desc, "Updated");
+
+  const withBlocks = await sendCourse(
+    "PUT",
+    `/api/courses/${created.id}`,
+    course({ lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: everyBlock }] }),
+  );
+  assert.match(await assertJsonError(withBlocks, 503), /007_lesson_blocks.sql/);
+  assert.equal((await readCourse(created.id)).desc, "Updated");
 });
 
 test("saving a course keeps each lesson's id, even when it is renamed or moved", async () => {

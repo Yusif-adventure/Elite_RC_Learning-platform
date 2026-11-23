@@ -64,7 +64,8 @@ app.use(cors({
     callback(new Error("Not allowed by CORS."));
   },
 }));
-app.use(express.json({ limit: "1mb" }));
+// Courses carry their lesson blocks, so a whole course can be a few megabytes.
+app.use(express.json({ limit: "5mb" }));
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -117,6 +118,18 @@ const uploadKinds = {
       ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     },
   },
+  "lesson-image": {
+    label: "Lesson image",
+    bucket: "lesson-resources",
+    maxBytes: 10 * MEGABYTE,
+    types: imageTypes,
+  },
+  "lesson-pdf": {
+    label: "Lesson PDF",
+    bucket: "lesson-resources",
+    maxBytes: 20 * MEGABYTE,
+    types: { ".pdf": "application/pdf" },
+  },
   video: {
     label: "Video preview",
     bucket: "lesson-resources",
@@ -135,7 +148,7 @@ const courseSelect = `
   course_sections (
     id, title, position,
     course_lessons (
-      id, title, position, youtube_url,
+      id, title, position, youtube_url, blocks,
       lesson_resources (id, resource_type, name, url, storage_path, mime_type, size_bytes, position)
     )
   )
@@ -155,7 +168,7 @@ const staffCourseSelect = `
   course_sections (
     id, title, position,
     course_lessons (
-      id, title, position, youtube_url,
+      id, title, position, youtube_url, blocks,
       lesson_resources (id, resource_type, name, url, storage_path, mime_type, size_bytes, position),
       lesson_assessments (quizzes (${quizSelect}))
     )
@@ -282,6 +295,8 @@ function toCourse(row) {
                 .map(({ name, url }) => ({ name, url }))[0]
             : undefined,
           youtubeUrl: lesson.youtube_url || undefined,
+          // Left out for lessons without blocks, so they read as they always have.
+          ...(Array.isArray(lesson.blocks) && lesson.blocks.length ? { blocks: lesson.blocks } : {}),
           ...(quiz ? { quiz: savedQuiz(quiz) } : {}),
         };
       }),
@@ -333,6 +348,129 @@ function isWebLink(value) {
   }
 }
 
+// Lesson blocks: the pieces an instructor stacks to build a lesson. They are
+// stored with the lesson (supabase/007_lesson_blocks.sql). Only the fields
+// each type needs are kept.
+const MAX_BLOCKS_PER_LESSON = 60;
+const MAX_ARRANGE_LINES = 40;
+const BLOCK_YOUTUBE_LINK = /^https?:\/\/(www\.|m\.)?(youtube\.com|youtu\.be|youtube-nocookie\.com)\/\S+$/i;
+
+function textOf(value, max) {
+  return typeof value === "string" && value.length <= max ? value : null;
+}
+
+function optionalText(value, max) {
+  return value === undefined || value === null || textOf(value, max) !== null;
+}
+
+const BLOCK_RULES = {
+  text: {
+    problem: (block) => (textOf(block.text, 20000)?.trim() ? null : "needs some text, up to 20,000 characters"),
+    keep: ({ text }) => ({ text }),
+  },
+  image: {
+    problem: (block) => {
+      if (!isWebLink(block.url)) return "needs a picture";
+      if (!textOf(block.alt, 300)?.trim()) return "needs a short description of the picture, for learners who cannot see it";
+      return optionalText(block.caption, 300) ? null : "caption must be 300 characters or fewer";
+    },
+    keep: ({ url, alt, caption }) => ({ url, alt, ...(caption ? { caption } : {}) }),
+  },
+  youtube: {
+    problem: (block) => {
+      if (!BLOCK_YOUTUBE_LINK.test(String(block.url || ""))) return "needs a full YouTube link";
+      return optionalText(block.title, 200) ? null : "title must be 200 characters or fewer";
+    },
+    keep: ({ url, title }) => ({ url, ...(title ? { title } : {}) }),
+  },
+  pdf: {
+    problem: (block) => (isWebLink(block.url) && textOf(block.name, 300)?.trim() ? null : "needs a PDF file"),
+    keep: ({ url, name }) => ({ url, name }),
+  },
+  video: {
+    problem: (block) => (isWebLink(block.url) && textOf(block.name, 300)?.trim() ? null : "needs a video file"),
+    keep: ({ url, name }) => ({ url, name }),
+  },
+  html: {
+    problem: (block) => {
+      if (!textOf(block.html, 100000)?.trim()) return "needs some HTML, up to 100,000 characters";
+      return optionalText(block.title, 200) ? null : "title must be 200 characters or fewer";
+    },
+    keep: ({ html, title }) => ({ html, ...(title ? { title } : {}) }),
+  },
+  arrange: {
+    problem: (block) => {
+      const code = textOf(block.code, 5000);
+      if (code === null) return "code must be 5,000 characters or fewer";
+      const lines = code.split(/\r?\n/).filter((line) => line.trim());
+      if (lines.length < 2) return "needs at least 2 lines of code to arrange";
+      if (lines.length > MAX_ARRANGE_LINES) return `can have up to ${MAX_ARRANGE_LINES} lines of code`;
+      if (!optionalText(block.title, 200)) return "title must be 200 characters or fewer";
+      return optionalText(block.instructions, 2000) ? null : "instructions must be 2,000 characters or fewer";
+    },
+    keep: ({ code, title, instructions }) => ({
+      code,
+      ...(title ? { title } : {}),
+      ...(instructions ? { instructions } : {}),
+    }),
+  },
+};
+
+function blocksProblem(blocks) {
+  if (blocks === undefined) return null;
+  if (!Array.isArray(blocks)) return "blocks must be a list";
+  if (blocks.length > MAX_BLOCKS_PER_LESSON) return `can have up to ${MAX_BLOCKS_PER_LESSON} blocks`;
+  const ids = new Set();
+  for (const [index, block] of blocks.entries()) {
+    const where = `block ${index + 1}`;
+    if (!block || typeof block !== "object" || Array.isArray(block)) return `${where} is not a block`;
+    if (!textOf(block.id, 64)?.trim()) return `${where} needs an id`;
+    if (ids.has(block.id)) return `${where} has the same id as another block`;
+    ids.add(block.id);
+    const rules = Object.hasOwn(BLOCK_RULES, block.type) ? BLOCK_RULES[block.type] : null;
+    if (!rules) return `${where} has an unknown type`;
+    const problem = rules.problem(block);
+    if (problem) return `${where} (${block.type}) ${problem}`;
+  }
+  return null;
+}
+
+function cleanBlocks(blocks) {
+  return (blocks || []).map((block) => ({ id: block.id, type: block.type, ...BLOCK_RULES[block.type].keep(block) }));
+}
+
+// Error codes for a column that does not exist because a setup SQL file was never run.
+const MISSING_COLUMN_CODES = ["42703", "PGRST204"];
+
+const BLOCKS_NOT_SET_UP =
+  "Lesson blocks are not set up in the database yet. Run supabase/007_lesson_blocks.sql in the Supabase SQL editor, then save again.";
+
+// Until supabase/007 is run, lessons are saved and read without blocks.
+async function lessonBlocksStored() {
+  const { error } = await supabaseAdmin.from("course_lessons").select("blocks").limit(1);
+  if (!error) return true;
+  if (MISSING_COLUMN_CODES.includes(error.code)) return false;
+  throw error;
+}
+
+async function blocksColumnMissing(input) {
+  const sendsBlocks = (input.lessonContent || []).some((lesson) => lesson.blocks?.length);
+  return sendsBlocks && !(await lessonBlocksStored());
+}
+
+function withoutBlocks(select) {
+  return select.split("youtube_url, blocks,").join("youtube_url,");
+}
+
+// Reads courses, falling back to a read without lesson blocks until the
+// blocks column exists.
+async function readCourses(client, select, narrow) {
+  const result = await narrow(client.from("courses").select(select));
+  return MISSING_COLUMN_CODES.includes(result.error?.code)
+    ? narrow(client.from("courses").select(withoutBlocks(select)))
+    : result;
+}
+
 function validateLessons(lessons, sections) {
   if (!Array.isArray(lessons)) return "Lessons must be an array.";
   const seenLessons = new Set();
@@ -353,6 +491,8 @@ function validateLessons(lessons, sections) {
       ...(lesson.youtubeUrl ? [lesson.youtubeUrl] : []),
     ];
     if (!links.every(isWebLink)) return `Lesson "${title}" has a file or video that is not a web link.`;
+    const blockProblem = blocksProblem(lesson.blocks);
+    if (blockProblem) return `Lesson "${title}" ${blockProblem}.`;
     if (lesson.quiz != null) {
       const quizProblem = validateQuiz(lesson.quiz, "lesson");
       if (quizProblem) return `Lesson "${title}" quiz: ${quizProblem}`;
@@ -403,11 +543,7 @@ function sendCourseWriteError(res, error) {
 }
 
 async function findCourse(id, client = supabase) {
-  const { data, error } = await client
-    .from("courses")
-    .select(courseSelect)
-    .eq("id", id)
-    .single();
+  const { data, error } = await readCourses(client, courseSelect, (query) => query.eq("id", id).single());
   if (error) throw error;
   return toCourse(data);
 }
@@ -431,7 +567,7 @@ async function assessmentTablesMissing(input) {
 // Reads courses the way staff see them, with quizzes and answer keys. Until
 // the assessment tables exist, staff still get their courses without quizzes.
 async function readStaffCourses(narrow) {
-  const run = (select) => narrow(supabaseAdmin.from("courses").select(select));
+  const run = (select) => readCourses(supabaseAdmin, select, narrow);
   const result = await run(staffCourseSelect);
   return MISSING_TABLE_CODES.includes(result.error?.code) ? run(courseSelect) : result;
 }
@@ -479,6 +615,7 @@ function lessonResourceRows(lessonId, lesson) {
 // Returns the id of every lesson, keyed by its section and title.
 async function syncChildren(courseId, input, current) {
   const lessonIds = new Map();
+  const storesBlocks = await lessonBlocksStored();
   await check(supabaseAdmin.from("course_objectives").delete().eq("course_id", courseId));
   const objectives = (input.objectives || [])
     .map((objective, position) => ({ course_id: courseId, objective: String(objective).trim(), position }))
@@ -527,6 +664,7 @@ async function syncChildren(courseId, input, current) {
         title: String(lesson.title).trim(),
         position,
         youtube_url: lesson.youtubeUrl || null,
+        ...(storesBlocks ? { blocks: cleanBlocks(lesson.blocks) } : {}),
       },
     };
   });
@@ -930,11 +1068,8 @@ app.get("/api/status", async (req, res) => {
 
 app.get("/api/courses", async (req, res) => {
   if (!requireSupabase(res)) return;
-  const { data, error } = await supabase
-    .from("courses")
-    .select(courseSelect)
-    .eq("status", "published")
-    .order("created_at", { ascending: true });
+  const { data, error } = await readCourses(supabase, courseSelect, (query) =>
+    query.eq("status", "published").order("created_at", { ascending: true }));
   if (error) {
     res.status(500).json({ error: error.message });
     return;
@@ -960,6 +1095,15 @@ app.post("/api/courses", requireStaff, async (req, res) => {
   }
   if (await assessmentTablesMissing(req.body)) {
     res.status(503).json({ error: ASSESSMENTS_NOT_SET_UP });
+    return;
+  }
+  try {
+    if (await blocksColumnMissing(req.body)) {
+      res.status(503).json({ error: BLOCKS_NOT_SET_UP });
+      return;
+    }
+  } catch (blocksError) {
+    res.status(500).json({ error: getErrorMessage(blocksError) });
     return;
   }
   const input = req.body;
@@ -991,6 +1135,15 @@ app.put("/api/courses/:id", requireStaff, async (req, res) => {
   }
   if (await assessmentTablesMissing(req.body)) {
     res.status(503).json({ error: ASSESSMENTS_NOT_SET_UP });
+    return;
+  }
+  try {
+    if (await blocksColumnMissing(req.body)) {
+      res.status(503).json({ error: BLOCKS_NOT_SET_UP });
+      return;
+    }
+  } catch (blocksError) {
+    res.status(500).json({ error: getErrorMessage(blocksError) });
     return;
   }
   const input = req.body;
