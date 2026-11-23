@@ -2076,7 +2076,7 @@ function ProfileSettings({
   const saveName = async () => {
     const name = fullName.trim();
     if (!name) {
-      setNameState({ busy: false, error: "Enter your name.", done: "" });
+      setNameState({ busy: false, error: "Enter a username.", done: "" });
       return;
     }
     setNameState({ busy: true, error: "", done: "" });
@@ -2085,7 +2085,7 @@ function ProfileSettings({
     setNameState(
       error
         ? { busy: false, error: error.message, done: "" }
-        : { busy: false, error: "", done: "Your name has been saved." },
+        : { busy: false, error: "", done: "Your username has been saved." },
     );
   };
 
@@ -2158,14 +2158,21 @@ function ProfileSettings({
           void saveName();
         }}
       >
-        <h3>Your name</h3>
+        <h3>Your username</h3>
         <label>
-          Full name
+          Username
           <input
             value={fullName}
             autoComplete="name"
+            maxLength={60}
+            aria-describedby="username-note"
             onChange={(event) => setFullName(event.target.value)}
           />
+          <small id="username-note">
+            {user.user_metadata?.full_name
+              ? "The name everyone sees: in menus, on staff lists and on courses you create."
+              : "You are shown by the start of your email address. Choose a username to change that."}
+          </small>
         </label>
         <label>
           Email address
@@ -2174,7 +2181,7 @@ function ProfileSettings({
         </label>
         <div className="profile-actions">
           <Button disabled={nameState.busy || fullName.trim() === memberName(user)}>
-            {nameState.busy ? "Saving..." : "Save name"}
+            {nameState.busy ? "Saving..." : "Save username"}
           </Button>
           {nameState.error && <p role="alert" className="form-error">{nameState.error}</p>}
           {nameState.done && <p role="status">{nameState.done}</p>}
