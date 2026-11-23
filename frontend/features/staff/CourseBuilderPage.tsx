@@ -36,6 +36,9 @@ const YOUTUBE_LINK =
 
 type LessonDraft = {
   id: number;
+  // The saved lesson this draft edits. Sent back so the lesson keeps its id,
+  // and everything linked to it, when it is renamed or moved.
+  savedId?: string;
   title: string;
   slides: CourseResource[];
   video?: CourseResource;
@@ -80,6 +83,7 @@ function draftsFromCourse(course: StaffCourse): SectionDraft[] {
       .filter((lesson) => lesson.section === section)
       .map((lesson) => ({
         id: newDraftId(),
+        savedId: lesson.id,
         title: lesson.title,
         slides: lesson.slides,
         video: lesson.video,
@@ -533,6 +537,7 @@ export function CourseBuilderPage({
         section.lessons
           .filter((lesson) => lesson.title.trim())
           .map((lesson) => ({
+            id: lesson.savedId,
             title: lesson.title.trim(),
             section: section.title.trim(),
             slides: lesson.slides,

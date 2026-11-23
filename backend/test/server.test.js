@@ -138,7 +138,7 @@ async function createCourse(overrides) {
   return (await response.json()).course;
 }
 
-// Lesson ids change whenever a course is saved, so content is compared without them.
+// Content is compared without lesson ids, which are checked on their own.
 function withoutLessonIds(saved) {
   for (const lesson of saved.lessonContent) assert.equal(typeof lesson.id, "string");
   return { ...saved, lessonContent: saved.lessonContent.map(({ id, ...lesson }) => lesson) };
@@ -962,11 +962,93 @@ test("saving a course keeps its lesson quizzes and their attempts", async () => 
   const response = await sendCourse("PUT", `/api/courses/${created.id}`, course({ title: "Flight Basics 2" }));
   assert.equal(response.status, 200);
   const saved = (await response.json()).course;
-  assert.notEqual(saved.lessonContent[0].id, welcome.id);
+  assert.equal(saved.lessonContent[0].id, welcome.id);
   const reloaded = (await (await loadLessonQuiz(saved.lessonContent[0].id)).json()).assessment;
   assert.equal(reloaded.id, quiz.id);
   assert.equal(fake.db.assessment_attempts.length, 1);
   assert.equal((await loadLessonQuiz(saved.lessonContent[1].id)).status, 404);
+});
+
+test("saving a course keeps each lesson's id, even when it is renamed or moved", async () => {
+  const created = await createCourse();
+  const [setupWelcome, flyingWelcome] = created.lessonContent;
+  const response = await sendCourse(
+    "PUT",
+    `/api/courses/${created.id}`,
+    course({
+      sections: ["Flying", "Landing"],
+      lessonContent: [
+        { ...setupWelcome, title: "First flight", section: "Flying" },
+        { ...flyingWelcome, section: "Landing" },
+        { title: "Approach", section: "Landing", slides: [] },
+      ],
+    }),
+  );
+  assert.equal(response.status, 200);
+  const saved = await readCourse(created.id);
+  assert.deepEqual(
+    saved.lessonContent.map(({ id, section, title }) => [id === setupWelcome.id, id === flyingWelcome.id, section, title]),
+    [
+      [true, false, "Flying", "First flight"],
+      [false, true, "Landing", "Welcome"],
+      [false, false, "Landing", "Approach"],
+    ],
+  );
+  assert.equal(saved.lessonContent[0].youtubeUrl, setupWelcome.youtubeUrl);
+  assert.deepEqual(saved.lessonContent[0].slides, setupWelcome.slides);
+  assert.equal(fake.db.course_sections.length, 2);
+  assert.equal(fake.db.course_lessons.length, 3);
+  assert.equal(fake.db.lesson_resources.length, 2);
+});
+
+test("lessons sent without ids keep their ids when their section and title match", async () => {
+  const created = await createCourse();
+  const response = await sendCourse("PUT", `/api/courses/${created.id}`, course({ title: "Flight Basics 2" }));
+  assert.equal(response.status, 200);
+  const saved = await readCourse(created.id);
+  assert.deepEqual(saved.lessonContent.map((lesson) => lesson.id), created.lessonContent.map((lesson) => lesson.id));
+});
+
+test("two lessons can swap titles in one save", async () => {
+  const created = await createCourse({
+    sections: ["Setup"],
+    lessonContent: [
+      { title: "One", section: "Setup", slides: [] },
+      { title: "Two", section: "Setup", slides: [] },
+    ],
+  });
+  const [one, two] = created.lessonContent;
+  const response = await sendCourse(
+    "PUT",
+    `/api/courses/${created.id}`,
+    course({
+      sections: ["Setup"],
+      lessonContent: [
+        { ...two, title: "One" },
+        { ...one, title: "Two" },
+      ],
+    }),
+  );
+  assert.equal(response.status, 200);
+  const saved = await readCourse(created.id);
+  assert.deepEqual(saved.lessonContent.map((lesson) => [lesson.id, lesson.title]), [[two.id, "One"], [one.id, "Two"]]);
+});
+
+test("a lesson id from another course is treated as a new lesson", async () => {
+  const other = await createCourse({ title: "Other Course" });
+  const created = await createCourse();
+  const response = await sendCourse(
+    "PUT",
+    `/api/courses/${created.id}`,
+    course({
+      sections: ["Setup"],
+      lessonContent: [{ id: other.lessonContent[0].id, title: "Borrowed", section: "Setup", slides: [] }],
+    }),
+  );
+  assert.equal(response.status, 200);
+  const saved = await readCourse(created.id);
+  assert.notEqual(saved.lessonContent[0].id, other.lessonContent[0].id);
+  assert.equal((await readCourse(other.id)).lessonContent[0].title, "Welcome");
 });
 
 test("a course edit that fails puts its lesson quizzes back too", async () => {
