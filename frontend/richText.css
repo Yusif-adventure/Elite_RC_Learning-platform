@@ -1,0 +1,128 @@
+/* Lesson text and quiz text. Code always scrolls inside its own box, so a
+   long line never widens the page on a phone. */
+
+.rich-text {
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.rich-text > :first-child {
+  margin-top: 0;
+}
+
+.rich-text > :last-child {
+  margin-bottom: 0;
+}
+
+.rich-text p,
+.rich-text ul,
+.rich-text ol,
+.rich-text blockquote,
+.rich-text .code-block {
+  margin: 0 0 14px;
+}
+
+.rich-text h2,
+.rich-text h3,
+.rich-text h4 {
+  margin: 24px 0 10px;
+  color: var(--navy);
+  font-family: "Manrope", sans-serif;
+  line-height: 1.25;
+}
+
+.rich-text h2 {
+  font-size: 22px;
+}
+
+.rich-text h3 {
+  font-size: 18px;
+}
+
+.rich-text h4 {
+  font-size: 16px;
+}
+
+.rich-text ul,
+.rich-text ol {
+  padding-left: 24px;
+}
+
+.rich-text li + li {
+  margin-top: 4px;
+}
+
+.rich-text a {
+  color: var(--blue);
+  text-decoration: underline;
+}
+
+.rich-text blockquote {
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--sky);
+  color: var(--navy);
+}
+
+.rich-text code,
+.quiz-text code {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--navy);
+  font-family: ui-monospace, "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
+  font-size: 0.9em;
+}
+
+.code-block {
+  display: block;
+  overflow-x: auto;
+  padding: 14px 16px;
+  border: 1px solid #1d3a63;
+  border-radius: 10px;
+  background: var(--navy);
+  color: #e9f4ff;
+  font-family: ui-monospace, "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
+  font-size: 14px;
+  line-height: 1.55;
+  text-align: left;
+  white-space: pre;
+}
+
+.code-block[data-language]::before {
+  content: attr(data-language);
+  display: block;
+  margin-bottom: 6px;
+  color: #75c8ff;
+  font-family: "DM Sans", sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rich-text .code-block code,
+.quiz-text .code-block code {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+}
+
+.quiz-text {
+  white-space: pre-wrap;
+}
+
+.quiz-text .code-block {
+  margin: 8px 0;
+  white-space: pre;
+}
+
+.quiz-text-line {
+  display: block;
+}

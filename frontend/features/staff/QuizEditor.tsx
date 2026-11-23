@@ -163,10 +163,14 @@ function QuestionCard({
           <RemoveButton onClick={onRemove}>Remove question</RemoveButton>
         </span>
       </div>
-      <Field label="Question" required>
+      <Field
+        label="Question"
+        required
+        hint="For code, put it between lines of three backticks (```), or wrap a short piece in single backticks: `digitalWrite`."
+      >
         <textarea
           className={showProblems && !question.questionText.trim() ? "invalid" : undefined}
-          rows={2}
+          rows={question.questionText.includes("\n") ? 6 : 2}
           value={question.questionText}
           onChange={(event) => {
             const value = event.target.value;
