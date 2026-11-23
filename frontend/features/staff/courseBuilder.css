@@ -1140,3 +1140,37 @@
     padding: 14px;
   }
 }
+
+/* Paste an image link instead of uploading */
+
+.image-link-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.image-link-row {
+  display: flex;
+  gap: 6px;
+}
+
+.course-form .image-link-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.image-link-field small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.image-link-field .image-link-error {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.image-link-row .block-tool {
+  flex: none;
+  white-space: nowrap;
+}

@@ -8,7 +8,7 @@ import {
   type TemplateInput,
   type UploadKind,
 } from "./courseApi";
-import { Field, FileField, FileRow, FormIcon, RemoveButton } from "./formParts";
+import { Field, FileField, FileRow, FormIcon, ImageLinkField, RemoveButton } from "./formParts";
 import { QuizEditor, type QuizChange } from "./QuizEditor";
 import { LessonBlocksEditor, type TemplateLibrary } from "./BlockEditor";
 import { LessonFullPage } from "./LessonFullPage";
@@ -826,6 +826,7 @@ export function CourseBuilderPage({
                     if (uploaded) setCourseImage(uploaded[0].url);
                   }}
                 >
+                  <ImageLinkField onUse={setCourseImage} />
                   {courseImage && (
                     <div className="image-preview">
                       <img src={courseImage} alt="Course image preview" />
@@ -850,6 +851,7 @@ export function CourseBuilderPage({
                     if (uploaded) setInstructorImage(uploaded[0].url);
                   }}
                 >
+                  <ImageLinkField onUse={setInstructorImage} />
                   {account?.photo && instructorImage !== account.photo && (
                     <button
                       type="button"
