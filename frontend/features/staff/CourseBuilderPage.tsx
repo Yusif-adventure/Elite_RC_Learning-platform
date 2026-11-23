@@ -1,6 +1,7 @@
 import { useContext, useEffect, useState } from "react";
 import { CATEGORY_NAMES } from "../../categories";
 import { descriptionText } from "../../courseText";
+import { splitOutcomes } from "./outcomes";
 import {
   deleteBlockTemplate,
   fetchBlockTemplates,
@@ -885,7 +886,7 @@ export function CourseBuilderPage({
             <FormStep
               number={2}
               title="What learners will achieve"
-              description="List the practical outcomes as clear points."
+              description="List the practical outcomes as clear points. Pasting a list adds one outcome per line."
             />
             <div className="form-outcomes">
               {learningPoints.map((point, index) => (
@@ -903,6 +904,18 @@ export function CourseBuilderPage({
                         ),
                       )
                     }
+                    onPaste={(event) => {
+                      // A pasted list becomes one outcome per line.
+                      const pasted = splitOutcomes(event.clipboardData.getData("text"));
+                      if (pasted.length < 2) return;
+                      event.preventDefault();
+                      setLearningPoints((points) => [
+                        ...points.slice(0, index),
+                        ...(points[index].trim() ? [points[index]] : []),
+                        ...pasted,
+                        ...points.slice(index + 1),
+                      ]);
+                    }}
                     placeholder="e.g. Configure a safe RC aircraft power system"
                   />
                   {learningPoints.length > 1 && (
