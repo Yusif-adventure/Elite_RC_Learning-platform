@@ -674,6 +674,14 @@ function setRole(userId, role, { token = STAFF_TOKEN } = {}) {
   });
 }
 
+// Final exams open only once every lesson is complete, so exam tests mark
+// the member's lessons done first.
+function completeLessons(course, userId = memberUser.id) {
+  for (const lesson of course.lessonContent) {
+    recordProgress(userId, course.id, JSON.stringify([lesson.section, lesson.title]), new Date(0).toISOString());
+  }
+}
+
 function recordProgress(userId, courseId, lessonKey, completedAt) {
   fake.db.lesson_progress.push({
     user_id: userId,
@@ -918,6 +926,7 @@ for (const [name, type, count] of questionCountCases) {
 
 test("a final exam passes at 80% unless the instructor sets another mark", async () => {
   const created = await createCourse();
+  completeLessons(created);
   const exam = await createFinalExam(created.id);
   assert.equal(exam.passMark, 80);
   assert.equal(fake.db.final_exams[0].pass_mark, 80);
@@ -1142,6 +1151,7 @@ test("a course edit that fails puts its lesson quizzes back too", async () => {
 
 test("final exams enforce three attempts and issue one certificate when passed", async () => {
   const created = await createCourse();
+  completeLessons(created);
   const exam = await createFinalExam(created.id, 50);
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -1160,8 +1170,24 @@ test("final exams enforce three attempts and issue one certificate when passed",
   assert.equal(fake.db.course_completions.length, 1);
 });
 
+test("a member must complete every lesson before opening or submitting the final exam", async () => {
+  const created = await createCourse();
+  const exam = await createFinalExam(created.id);
+  const [first] = created.lessonContent;
+  recordProgress(memberUser.id, created.id, JSON.stringify([first.section, first.title]), new Date(0).toISOString());
+
+  const open = await sendJson("GET", `/api/courses/${created.id}/final-exam`, undefined, { token: MEMBER_TOKEN });
+  assert.match(await assertJsonError(open, 403), /Complete all course lessons/);
+  assert.match(await assertJsonError(await submit(exam.id, answersFor(exam)), 403), /Complete all course lessons/);
+  assert.equal(fake.db.assessment_attempts.length, 0);
+
+  completeLessons(created);
+  assert.equal((await submit(exam.id, answersFor(exam))).status, 201);
+});
+
 test("a final exam refuses a fourth failed attempt", async () => {
   const created = await createCourse();
+  completeLessons(created);
   const exam = await createFinalExam(created.id, 100);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     assert.equal((await submit(exam.id, answersFor(exam, 0))).status, 201);
@@ -1171,6 +1197,7 @@ test("a final exam refuses a fourth failed attempt", async () => {
 
 test("a passing submission that cannot issue the certificate does not use up an attempt", async () => {
   const created = await createCourse();
+  completeLessons(created);
   const exam = await createFinalExam(created.id);
   fake.failNext("certificates");
 
@@ -1243,6 +1270,7 @@ test("the attempt history skips questions added after the attempt", async () => 
 
 test("final exam history says how many attempts remain", async () => {
   const created = await createCourse();
+  completeLessons(created);
   const exam = await createFinalExam(created.id);
   await submit(exam.id, answersFor(exam, 0));
   const body = await (await loadAttempts(exam.id)).json();

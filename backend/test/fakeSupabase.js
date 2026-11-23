@@ -235,7 +235,14 @@ export async function startFakeSupabase({ serviceKey }) {
       const rows = db[table]
         .filter(matches)
         .slice(offset, offset + limit)
-        .map((row) => (table === "courses" ? nestedCourse(row, select) : row));
+        .map((row) => {
+          if (table === "courses") return nestedCourse(row, select);
+          // Like PostgREST, a section can embed its lessons.
+          if (table === "course_sections" && select.includes("course_lessons")) {
+            return { ...row, course_lessons: db.course_lessons.filter((lesson) => lesson.section_id === row.id) };
+          }
+          return row;
+        });
       if (!String(headers.accept).includes("vnd.pgrst.object")) return { status: 200, body: rows };
       return rows.length === 1
         ? { status: 200, body: rows[0] }
