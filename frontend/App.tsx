@@ -7,6 +7,7 @@ import {
   InstructorWorkspace,
   MembersPage,
   StaffAccountContext,
+  StaffProfilePage,
   StaffOverview,
 } from "./features/staff/StaffPages";
 import { CourseBuilderPage } from "./features/staff/CourseBuilderPage";
@@ -444,7 +445,7 @@ function roleLabel(user?: User | null) {
   return role === "instructor" ? "Instructor" : role === "staff" ? "Staff" : "Member";
 }
 
-const STAFF_PAGES: Page[] = ["admin", "builder", "instructor", "members"];
+const STAFF_PAGES: Page[] = ["admin", "builder", "instructor", "members", "staff-profile"];
 
 function memberInitials(user: User) {
   return initialsOf(memberName(user));
@@ -1233,13 +1234,13 @@ function AppShell({
             </button>
           )}
         </nav>
-        <div className="side-user">
+        <button type="button" className="side-user" onClick={() => go("profile")} aria-label="Your profile">
           <span><Avatar photo={accountPhoto(user)} initials={memberInitials(user)} /></span>
           <div>
             <b>{memberName(user)}</b>
             <small>{roleLabel(user)}</small>
           </div>
-        </div>
+        </button>
       </aside>
       <div className="workspace">
         <header className="app-top">
@@ -2030,7 +2031,9 @@ function ResetPassword() {
   );
 }
 
-function ProfilePage({
+// The photo, name and password settings, shared by the member profile and
+// the staff workspace profile.
+function ProfileSettings({
   user,
   onSignOut,
 }: {
@@ -2105,6 +2108,124 @@ function ProfilePage({
   };
 
   return (
+    <section className="panel profile-panel">
+      <div className="profile-cover" />
+      <div className="profile-main">
+        <span className="profile-avatar">
+          <Avatar photo={photo} initials={memberInitials(user)} />
+        </span>
+        <div>
+          <h2>{memberName(user)}</h2>
+          <p>
+            {roleLabel(user)} · {user.email}
+          </p>
+          <div className="profile-photo-actions">
+            <label className={`btn outline profile-photo-pick${photoState.busy ? " busy" : ""}`}>
+              <input
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,.gif"
+                disabled={photoState.busy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  void uploadPhoto(file);
+                }}
+              />
+              <span>{photoState.busy ? "Saving..." : photo ? "Change photo" : "Add a photo"}</span>
+            </label>
+            {photo && (
+              <button type="button" className="text-link" disabled={photoState.busy} onClick={() => void removePhoto()}>
+                Remove photo
+              </button>
+            )}
+            {(photoState.error || photoState.done) && (
+              <small role={photoState.error ? "alert" : "status"} className={photoState.error ? "form-error" : undefined}>
+                {photoState.error || photoState.done}
+              </small>
+            )}
+          </div>
+        </div>
+        <Button variant="outline" onClick={onSignOut}>
+          Sign out
+        </Button>
+      </div>
+      <form
+        className="profile-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveName();
+        }}
+      >
+        <h3>Your name</h3>
+        <label>
+          Full name
+          <input
+            value={fullName}
+            autoComplete="name"
+            onChange={(event) => setFullName(event.target.value)}
+          />
+        </label>
+        <label>
+          Email address
+          <input value={user.email || ""} readOnly aria-describedby="email-note" />
+          <small id="email-note">Your email address is your sign-in and cannot be changed here.</small>
+        </label>
+        <div className="profile-actions">
+          <Button disabled={nameState.busy || fullName.trim() === memberName(user)}>
+            {nameState.busy ? "Saving..." : "Save name"}
+          </Button>
+          {nameState.error && <p role="alert" className="form-error">{nameState.error}</p>}
+          {nameState.done && <p role="status">{nameState.done}</p>}
+        </div>
+      </form>
+      <form
+        className="profile-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void savePassword();
+        }}
+      >
+        <h3>Change password</h3>
+        <label>
+          New password
+          <input
+            type="password"
+            value={password}
+            autoComplete="new-password"
+            minLength={6}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </label>
+        <label>
+          Confirm new password
+          <input
+            type="password"
+            value={confirmation}
+            autoComplete="new-password"
+            minLength={6}
+            onChange={(event) => setConfirmation(event.target.value)}
+          />
+        </label>
+        <div className="profile-actions">
+          <Button disabled={passwordState.busy || !password}>
+            {passwordState.busy ? "Saving..." : "Change password"}
+          </Button>
+          {passwordState.error && <p role="alert" className="form-error">{passwordState.error}</p>}
+          {passwordState.done && <p role="status">{passwordState.done}</p>}
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function ProfilePage({
+  user,
+  onSignOut,
+}: {
+  user: User;
+  onSignOut: () => void;
+}) {
+  return (
     <AppShell active="profile" user={user} onSignOut={onSignOut}>
       <div className="page-title">
         <div>
@@ -2113,113 +2234,7 @@ function ProfilePage({
           <p>Update your photo, name and password.</p>
         </div>
       </div>
-      <section className="panel profile-panel">
-        <div className="profile-cover" />
-        <div className="profile-main">
-          <span className="profile-avatar">
-            <Avatar photo={photo} initials={memberInitials(user)} />
-          </span>
-          <div>
-            <h2>{memberName(user)}</h2>
-            <p>
-              {roleLabel(user)} · {user.email}
-            </p>
-            <div className="profile-photo-actions">
-              <label className={`btn outline profile-photo-pick${photoState.busy ? " busy" : ""}`}>
-                <input
-                  type="file"
-                  accept=".png,.jpg,.jpeg,.webp,.gif"
-                  disabled={photoState.busy}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    event.target.value = "";
-                    void uploadPhoto(file);
-                  }}
-                />
-                <span>{photoState.busy ? "Saving..." : photo ? "Change photo" : "Add a photo"}</span>
-              </label>
-              {photo && (
-                <button type="button" className="text-link" disabled={photoState.busy} onClick={() => void removePhoto()}>
-                  Remove photo
-                </button>
-              )}
-              {(photoState.error || photoState.done) && (
-                <small role={photoState.error ? "alert" : "status"} className={photoState.error ? "form-error" : undefined}>
-                  {photoState.error || photoState.done}
-                </small>
-              )}
-            </div>
-          </div>
-          <Button variant="outline" onClick={onSignOut}>
-            Sign out
-          </Button>
-        </div>
-        <form
-          className="profile-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void saveName();
-          }}
-        >
-          <h3>Your name</h3>
-          <label>
-            Full name
-            <input
-              value={fullName}
-              autoComplete="name"
-              onChange={(event) => setFullName(event.target.value)}
-            />
-          </label>
-          <label>
-            Email address
-            <input value={user.email || ""} readOnly aria-describedby="email-note" />
-            <small id="email-note">Your email address is your sign-in and cannot be changed here.</small>
-          </label>
-          <div className="profile-actions">
-            <Button disabled={nameState.busy || fullName.trim() === memberName(user)}>
-              {nameState.busy ? "Saving..." : "Save name"}
-            </Button>
-            {nameState.error && <p role="alert" className="form-error">{nameState.error}</p>}
-            {nameState.done && <p role="status">{nameState.done}</p>}
-          </div>
-        </form>
-        <form
-          className="profile-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void savePassword();
-          }}
-        >
-          <h3>Change password</h3>
-          <label>
-            New password
-            <input
-              type="password"
-              value={password}
-              autoComplete="new-password"
-              minLength={6}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </label>
-          <label>
-            Confirm new password
-            <input
-              type="password"
-              value={confirmation}
-              autoComplete="new-password"
-              minLength={6}
-              onChange={(event) => setConfirmation(event.target.value)}
-            />
-          </label>
-          <div className="profile-actions">
-            <Button disabled={passwordState.busy || !password}>
-              {passwordState.busy ? "Saving..." : "Change password"}
-            </Button>
-            {passwordState.error && <p role="alert" className="form-error">{passwordState.error}</p>}
-            {passwordState.done && <p role="status">{passwordState.done}</p>}
-          </div>
-        </form>
-      </section>
+      <ProfileSettings user={user} onSignOut={onSignOut} />
     </AppShell>
   );
 }
@@ -2303,6 +2318,7 @@ function pageTitle(route: Route, course?: Course) {
     admin: "Staff workspace",
     instructor: "Instructor workspace",
     members: "Members",
+    "staff-profile": "Your profile",
     builder: course ? `Edit ${course.title}` : "New course",
     "not-found": "Page not found",
   };
@@ -2779,6 +2795,14 @@ export default function App() {
       break;
     case "members":
       content = <MembersPage {...dashboardProps} />;
+      break;
+    case "staff-profile":
+      content = user && (
+        <StaffProfilePage
+          {...dashboardProps}
+          settings={<ProfileSettings user={user} onSignOut={signOut} />}
+        />
+      );
       break;
     case "builder":
       if (route.courseId && staffLoading) {

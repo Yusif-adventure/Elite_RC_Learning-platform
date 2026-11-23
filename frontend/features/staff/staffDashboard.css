@@ -787,3 +787,63 @@
     grid-column: 1 / -1;
   }
 }
+
+/* The staff member's own profile page */
+.teaching-panel {
+  margin-top: 22px;
+}
+.teaching-stats {
+  padding: 18px 22px 0;
+}
+.teaching-list {
+  display: grid;
+  margin: 0;
+  padding: 8px 0;
+  list-style: none;
+}
+.teaching-list li {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 22px;
+  border-top: 1px solid var(--line);
+}
+.teaching-list img {
+  width: 70px;
+  height: 52px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+.teaching-list li > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.teaching-list b {
+  color: var(--ink);
+  font-size: 14px;
+}
+.teaching-list small {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  .teaching-stats {
+    padding: 14px 16px 0;
+  }
+  .teaching-list li {
+    grid-template-columns: 56px minmax(0, 1fr);
+    padding: 12px 16px;
+  }
+  .teaching-list img {
+    width: 56px;
+    height: 44px;
+  }
+  .teaching-list li > .btn {
+    grid-column: 1 / -1;
+  }
+}

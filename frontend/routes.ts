@@ -17,6 +17,7 @@ export type Route =
   | { page: "admin" }
   | { page: "instructor" }
   | { page: "members" }
+  | { page: "staff-profile" }
   | { page: "builder"; courseId?: string }
   | { page: "not-found" };
 
@@ -45,6 +46,7 @@ const fixedPages: Record<string, Route> = {
   "/staff": { page: "admin" },
   "/staff/instructors": { page: "instructor" },
   "/staff/members": { page: "members" },
+  "/staff/profile": { page: "staff-profile" },
   "/staff/courses/new": { page: "builder" },
 };
 
