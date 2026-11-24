@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { CATEGORY_NAMES } from "../../categories";
 import { descriptionText } from "../../courseText";
+import "../../courseText.css";
 import { splitOutcomes } from "./outcomes";
 import {
   deleteBlockTemplate,
@@ -214,7 +215,7 @@ function CoursePreview({
         <div className="course-body">
           <span className="category">{category || "Category"}</span>
           <h3>{title.trim() || "Your course title"}</h3>
-          <p>
+          <p className="course-description">
             {descriptionText(description).trim() ||
               "A short description of what learners will achieve."}
           </p>

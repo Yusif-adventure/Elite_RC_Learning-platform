@@ -599,7 +599,7 @@ function CourseCard({ course, index = 0 }: { course: Course; index?: number }) {
       <div className="course-body">
         <span className="category">{course.category}</span>
         <h3>{course.title}</h3>
-        <p>{descriptionText(course.desc)}</p>
+        <p className="course-description">{descriptionText(course.desc)}</p>
         <div className="course-meta">
           <span>
             <Icon name="user" size={15} />
@@ -1377,7 +1377,7 @@ function Dashboard({
           <div>
             <span className="badge">START HERE</span>
             <h2>{featured.title}</h2>
-            <p>{descriptionText(featured.desc)}</p>
+            <p className="course-description">{descriptionText(featured.desc)}</p>
             <small>
               {lessonCount(featured)} lessons · {featured.duration}
             </small>
@@ -2317,7 +2317,7 @@ function InstructorPage({
                         {course.category} · {course.level}
                       </span>
                       <b>{course.title}</b>
-                      <small>{descriptionText(course.desc)}</small>
+                      <small className="course-description">{descriptionText(course.desc)}</small>
                     </span>
                   </button>
                   {lessons.length > 0 && (

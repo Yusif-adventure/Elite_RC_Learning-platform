@@ -1,5 +1,6 @@
-
-/* Course descriptions keep their line breaks and tabs on the course page. */
+/* Course descriptions keep their line breaks and tabs everywhere they are
+   shown: course cards, the builder's learner preview, the dashboard and the
+   course page. */
 .course-description {
   white-space: pre-wrap;
   tab-size: 4;
