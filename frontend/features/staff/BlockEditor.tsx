@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ConfirmDialog } from "./Feedback";
 import {
   BLOCK_TYPES,
   MAX_ARRANGE_LINES,
@@ -74,12 +75,18 @@ export function LessonBlocksEditor({
   const move = (from: number, to: number) => onChange((current) => moveItem(current, from, to));
   const replace = (id: string, block: LessonBlock) =>
     onChange((current) => current.map((item) => (item.id === id ? block : item)));
-  const removeTemplate = async (template: BlockTemplate) => {
-    if (!window.confirm(`Delete the "${template.name}" template? Lessons that already use it keep their copy.`)) return;
+  // The template waiting for a yes in the delete dialog.
+  const [deleting, setDeleting] = useState<BlockTemplate | null>(null);
+  const [deleteState, setDeleteState] = useState({ busy: false, error: "" });
+  const removeTemplate = async () => {
+    if (!deleting) return;
+    setDeleteState({ busy: true, error: "" });
     try {
-      await templates.remove(template);
+      await templates.remove(deleting);
+      setDeleting(null);
+      setDeleteState({ busy: false, error: "" });
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "The template could not be deleted.");
+      setDeleteState({ busy: false, error: error instanceof Error ? error.message : "The template could not be deleted." });
     }
   };
 
@@ -88,8 +95,8 @@ export function LessonBlocksEditor({
       <div className="block-editor-head">
         <b>Lesson content</b>
         <small>
-          Stack text, pictures, videos, PDFs and activities in the order learners should see them. Files and
-          videos added below still show after these blocks.
+          Stack text, pictures, videos, PDFs and activities in the order learners should see them. Learners see
+          these first, then the slides, video and YouTube link above.
         </small>
       </div>
       {blocks.map((block, index) => (
@@ -143,9 +150,13 @@ export function LessonBlocksEditor({
                 </button>
                 <button
                   type="button"
-                  className="block-tool"
+                  className="block-template-delete"
                   aria-label={`Delete the ${template.name} template`}
-                  onClick={() => void removeTemplate(template)}
+                  title="Delete template"
+                  onClick={() => {
+                    setDeleteState({ busy: false, error: "" });
+                    setDeleting(template);
+                  }}
                 >
                   ×
                 </button>
@@ -157,6 +168,24 @@ export function LessonBlocksEditor({
             None yet. Write an HTML block with {"{{placeholders}}"} for the parts that change, then choose Save as
             template.
           </small>
+        )}
+        {deleting && (
+          <ConfirmDialog
+            title={`Delete the "${deleting.name}" template?`}
+            confirmLabel="Delete template"
+            busyLabel="Deleting..."
+            busy={deleteState.busy}
+            onConfirm={() => void removeTemplate()}
+            onCancel={() => setDeleting(null)}
+          >
+            <p>It disappears from From your templates for every instructor.</p>
+            <p>Lessons that already use it keep their own copy and do not change.</p>
+            {deleteState.error && (
+              <p className="form-error" role="alert">
+                {deleteState.error}
+              </p>
+            )}
+          </ConfirmDialog>
         )}
       </div>
     </div>
@@ -190,7 +219,7 @@ function BlockCard({
 }) {
   const [previewing, setPreviewing] = useState(false);
   const problem = blockProblem(block);
-  const canPreview = ["text", "html", "arrange", "template"].includes(block.type) && !problem;
+  const canPreview = ["text", "html", "arrange", "template", "flipcard"].includes(block.type) && !problem;
   const invalid = (bad: boolean) => (showProblems && bad ? "invalid" : undefined);
 
   return (
@@ -341,6 +370,31 @@ function BlockCard({
               onUpdate={onUpdate}
               onReplace={onReplace}
             />
+          )}
+
+          {block.type === "flipcard" && (
+            <>
+              <Field label="Front (the question)" required hint="Line breaks are kept, and `backticks` show code.">
+                <textarea
+                  className={invalid(!block.front.trim())}
+                  rows={2}
+                  maxLength={500}
+                  value={block.front}
+                  onChange={(event) => onUpdate({ front: event.target.value })}
+                  placeholder="e.g. What does pinMode(13, OUTPUT) do?"
+                />
+              </Field>
+              <Field label="Back (the answer)" required>
+                <textarea
+                  className={invalid(Boolean(block.front.trim()) && !block.back.trim())}
+                  rows={3}
+                  maxLength={1000}
+                  value={block.back}
+                  onChange={(event) => onUpdate({ back: event.target.value })}
+                  placeholder="e.g. It tells pin 13 to send power out, so it can light the LED."
+                />
+              </Field>
+            </>
           )}
 
           {block.type === "arrange" && (

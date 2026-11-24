@@ -8,6 +8,7 @@ export type Route =
   | { page: "privacy" }
   | { page: "terms" }
   | { page: "course"; courseId: string }
+  | { page: "instructor-profile"; name: string }
   | { page: "lesson"; courseId: string; lessonIndex: number }
   | { page: "auth"; register?: boolean; next?: string }
   | { page: "reset-password" }
@@ -17,6 +18,7 @@ export type Route =
   | { page: "admin" }
   | { page: "instructor" }
   | { page: "members" }
+  | { page: "staff-profile" }
   | { page: "builder"; courseId?: string }
   | { page: "not-found" };
 
@@ -45,6 +47,7 @@ const fixedPages: Record<string, Route> = {
   "/staff": { page: "admin" },
   "/staff/instructors": { page: "instructor" },
   "/staff/members": { page: "members" },
+  "/staff/profile": { page: "staff-profile" },
   "/staff/courses/new": { page: "builder" },
 };
 
@@ -77,6 +80,9 @@ export function parseRoute(pathname: string, search: string): Route {
       return { page: "lesson", courseId: parts[1], lessonIndex: Number(parts[3]) - 1 };
     }
   }
+  if (parts[0] === "instructors" && parts.length === 2 && parts[1].trim()) {
+    return { page: "instructor-profile", name: parts[1] };
+  }
   if (parts[0] === "staff" && parts[1] === "courses" && parts.length === 4 && parts[3] === "edit") {
     return { page: "builder", courseId: parts[2] };
   }
@@ -98,6 +104,8 @@ export function routePath(route: Route): string {
       return `/courses/${id(route.courseId)}`;
     case "lesson":
       return `/courses/${id(route.courseId)}/lessons/${route.lessonIndex + 1}`;
+    case "instructor-profile":
+      return `/instructors/${id(route.name)}`;
     case "builder":
       return route.courseId ? `/staff/courses/${id(route.courseId)}/edit` : "/staff/courses/new";
     case "auth": {

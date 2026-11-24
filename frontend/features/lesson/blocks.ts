@@ -20,6 +20,7 @@ export type LessonBlock =
   | { id: string; type: "youtube"; url: string; title?: string }
   | { id: string; type: "pdf"; url: string; name: string }
   | { id: string; type: "video"; url: string; name: string }
+  | { id: string; type: "flipcard"; front: string; back: string }
   | { id: string; type: "html"; html: string; title?: string }
   | { id: string; type: "arrange"; code: string; title?: string; instructions?: string }
   // A lesson keeps its own copy of the template, so later changes to the
@@ -44,6 +45,7 @@ export const BLOCK_TYPES: { type: BlockType; label: string; description: string 
   { type: "youtube", label: "YouTube", description: "A video that plays in the lesson" },
   { type: "pdf", label: "PDF", description: "Read on the page or download" },
   { type: "video", label: "Video file", description: "An uploaded MP4 clip" },
+  { type: "flipcard", label: "Flip card", description: "A question that flips to its answer" },
   { type: "arrange", label: "Arrange the lines", description: "Put shuffled code in order" },
   { type: "html", label: "HTML / CSS / JS", description: "Your own design or activity" },
 ];
@@ -68,6 +70,8 @@ export function newBlock(type: Exclude<BlockType, "template">): LessonBlock {
       return { id, type, url: "", name: "" };
     case "html":
       return { id, type, html: "" };
+    case "flipcard":
+      return { id, type, front: "", back: "" };
     case "arrange":
       return { id, type, code: "" };
   }
@@ -100,20 +104,41 @@ export function arrangeLines(code: string): string[] {
   return code.replace(/\r\n?/g, "\n").split("\n").filter((line) => line.trim()).map((line) => line.replace(/\s+$/, ""));
 }
 
-// Shuffles the lines, never leaving them already in order when they can be
-// out of order. `random` is replaceable for tests.
-export function shuffleLines(lines: string[], random: () => number = Math.random): string[] {
-  if (new Set(lines).size < 2) return [...lines];
+// Shuffles the items, never leaving their text already in order when it can
+// be out of order. `random` is replaceable for tests.
+export function shuffleItems<T>(items: T[], textOf: (item: T) => string, random: () => number = Math.random): T[] {
+  const texts = items.map(textOf);
+  if (new Set(texts).size < 2) return [...items];
   for (let tries = 0; tries < 20; tries += 1) {
-    const shuffled = [...lines];
+    const shuffled = [...items];
     for (let index = shuffled.length - 1; index > 0; index -= 1) {
       const swap = Math.floor(random() * (index + 1));
       [shuffled[index], shuffled[swap]] = [shuffled[swap], shuffled[index]];
     }
-    if (shuffled.some((line, index) => line !== lines[index])) return shuffled;
+    if (shuffled.some((item, index) => textOf(item) !== texts[index])) return shuffled;
   }
-  // Very unlikely: move the first line to the end.
-  return [...lines.slice(1), lines[0]];
+  // Very unlikely: move the first item to the end.
+  return [...items.slice(1), items[0]];
+}
+
+export function shuffleLines(lines: string[], random: () => number = Math.random): string[] {
+  return shuffleItems(lines, (line) => line, random);
+}
+
+// Where a dragged row would land: the number of other rows whose middle is
+// above the dragged row's middle. Uses where the rows were when the drag
+// started, so moving rows aside never changes the answer (no jitter).
+export function dropIndex(rows: { top: number; height: number }[], from: number, draggedMiddle: number): number {
+  return rows.filter((row, index) => index !== from && row.top + row.height / 2 < draggedMiddle).length;
+}
+
+// How far a row slides while another is dragged from `from` to `over`:
+// rows in between make room by moving one slot the other way.
+export function dragShift(index: number, from: number, over: number, slot: number): number {
+  if (index === from) return 0;
+  if (from < over && index > from && index <= over) return -slot;
+  if (over < from && index >= over && index < from) return slot;
+  return 0;
 }
 
 // Which lines are in the right place. Lines are compared by their text, so
@@ -148,6 +173,9 @@ export function blockProblem(block: LessonBlock): string {
       return block.url ? "" : "Upload a video for this video block, or remove it.";
     case "html":
       return block.html.trim() ? "" : "Add some HTML to this HTML block, or remove it.";
+    case "flipcard":
+      if (!block.front.trim()) return "Add a question or prompt to the front of this flip card.";
+      return block.back.trim() ? "" : "Add the answer to the back of this flip card.";
     case "arrange": {
       const count = arrangeLines(block.code).length;
       if (count < 2) return "An arrange-the-lines block needs at least 2 lines of code.";
@@ -241,14 +269,21 @@ ${html}
 <script>
 (function () {
   var last = 0;
+  // The height of the content itself. The page's scrollHeight would include
+  // the frame's own height, so the frame could only ever grow.
+  function contentHeight() {
+    var body = document.body;
+    var margin = parseFloat(getComputedStyle(body).marginBottom) || 0;
+    return Math.ceil(body.getBoundingClientRect().bottom + window.scrollY + margin);
+  }
   function report() {
-    var height = Math.ceil(document.documentElement.scrollHeight);
-    if (height !== last) {
+    var height = contentHeight();
+    if (Math.abs(height - last) > 1) {
       last = height;
       parent.postMessage({ type: ${JSON.stringify(FRAME_MESSAGE)}, frame: ${JSON.stringify(frameId)}, height: height }, "*");
     }
   }
-  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.body);
   window.addEventListener("load", report);
   setInterval(report, 1000);
   report();

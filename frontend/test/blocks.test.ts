@@ -67,7 +67,7 @@ test("moving an item keeps the rest in order and ignores moves off the ends", ()
 });
 
 test("new blocks start empty and say what they still need", () => {
-  for (const type of ["text", "image", "youtube", "pdf", "video", "html", "arrange"] as const) {
+  for (const type of ["text", "image", "youtube", "pdf", "video", "flipcard", "html", "arrange"] as const) {
     const block = newBlock(type);
     assert.equal(block.type, type);
     assert.notEqual(blockProblem(block), "", type);
@@ -132,4 +132,42 @@ test("a block made from a template copies it and starts with empty values", () =
   assert.deepEqual(block.values, { front: "" });
   assert.equal(templateChanged(block, template), false);
   assert.equal(templateChanged(block, { ...template, html: "<b>{{front}}</b>" }), true);
+});
+
+import { dragShift, dropIndex, shuffleItems } from "../features/lesson/blocks";
+
+test("shuffled items keep their ids and are never left in text order", () => {
+  const items = ["a", "b", "c"].map((text, id) => ({ id, text }));
+  for (let run = 0; run < 30; run += 1) {
+    const shuffled = shuffleItems(items, (item) => item.text);
+    assert.notDeepEqual(shuffled.map((item) => item.text), ["a", "b", "c"]);
+    assert.deepEqual(shuffled.map((item) => item.id).sort(), [0, 1, 2]);
+  }
+});
+
+test("a dragged row lands where its middle is among the other rows", () => {
+  const rows = [0, 50, 100, 150].map((top) => ({ top, height: 44 }));
+  // Row 0 (middle 22) dragged down by 0, 40, 90, 110 and 200 pixels.
+  assert.equal(dropIndex(rows, 0, 22), 0);
+  assert.equal(dropIndex(rows, 0, 22 + 40), 0);
+  assert.equal(dropIndex(rows, 0, 22 + 90), 1);
+  assert.equal(dropIndex(rows, 0, 22 + 110), 2);
+  assert.equal(dropIndex(rows, 0, 22 + 200), 3);
+  // Row 3 dragged to the top.
+  assert.equal(dropIndex(rows, 3, 10), 0);
+});
+
+test("rows between the start and the drop slide one slot to make room", () => {
+  // Dragging row 0 down to slot 2: rows 1 and 2 move up.
+  assert.deepEqual([0, 1, 2, 3].map((index) => dragShift(index, 0, 2, 50)), [0, -50, -50, 0]);
+  // Dragging row 3 up to slot 1: rows 1 and 2 move down.
+  assert.deepEqual([0, 1, 2, 3].map((index) => dragShift(index, 3, 1, 50)), [0, 50, 50, 0]);
+  // Not moved: nothing shifts.
+  assert.deepEqual([0, 1, 2].map((index) => dragShift(index, 1, 1, 50)), [0, 0, 0]);
+});
+
+test("a flip card needs both sides filled in", () => {
+  assert.match(blockProblem({ id: "1", type: "flipcard", front: "", back: "x" }), /front/);
+  assert.match(blockProblem({ id: "1", type: "flipcard", front: "Q", back: " " }), /back/);
+  assert.equal(blockProblem({ id: "1", type: "flipcard", front: "Q", back: "A" }), "");
 });

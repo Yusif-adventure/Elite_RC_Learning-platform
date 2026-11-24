@@ -421,6 +421,13 @@ const BLOCK_RULES = {
     },
     keep: ({ html, title }) => ({ html, ...(title ? { title } : {}) }),
   },
+  flipcard: {
+    problem: (block) => {
+      if (!textOf(block.front, 500)?.trim()) return "needs something on the front, up to 500 characters";
+      return textOf(block.back, 1000)?.trim() ? null : "needs something on the back, up to 1,000 characters";
+    },
+    keep: ({ front, back }) => ({ front, back }),
+  },
   template: {
     problem: (block) => {
       if (!textOf(block.html, 100000)?.trim()) return "needs the template's HTML";

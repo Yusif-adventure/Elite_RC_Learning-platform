@@ -9,12 +9,15 @@ export function LessonFullPage({
   title,
   editor,
   preview,
+  actions,
   onClose,
 }: {
   label: string;
   title: string;
   editor: ReactNode;
   preview: ReactNode;
+  // Shown at the top right, beside Edit and Preview: the Save button.
+  actions?: ReactNode;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"edit" | "preview">("edit");
@@ -32,7 +35,7 @@ export function LessonFullPage({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !document.querySelector(".dialog-backdrop")) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -56,6 +59,8 @@ export function LessonFullPage({
             {title.trim() || "Untitled lesson"}
           </h2>
         </div>
+        <div className="lesson-fullpage-right">
+        {actions}
         <div className="lesson-fullpage-modes" role="group" aria-label="Edit or preview">
           <button type="button" aria-pressed={mode === "edit"} onClick={() => setMode("edit")}>
             Edit
@@ -63,6 +68,7 @@ export function LessonFullPage({
           <button type="button" aria-pressed={mode === "preview"} onClick={() => setMode("preview")}>
             Preview
           </button>
+        </div>
         </div>
       </header>
 

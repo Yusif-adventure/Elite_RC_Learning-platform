@@ -22,7 +22,7 @@ import type { StaffDataStatus } from "./useStaffData";
 import type { SavedFinalExam, SavedQuiz } from "./quizDrafts";
 import "./staffDashboard.css";
 
-type StaffPage = "admin" | "builder" | "instructor" | "members" | "course";
+type StaffPage = "admin" | "builder" | "instructor" | "members" | "course" | "staff-profile";
 
 // The signed-in staff member, shown in the staff sidebar.
 export type StaffAccount = {
@@ -82,6 +82,8 @@ export type StaffPagesProps = {
   courses: StaffCourse[];
   onNavigate: (page: StaffPage, course?: StaffCourse) => void;
   onSaveCourse: (course: StaffCourse) => Promise<void>;
+  // Saves without leaving the builder and returns the saved course.
+  onSaveDraft?: (course: StaffCourse) => Promise<StaffCourse>;
   onDeleteCourse: (course: StaffCourse) => void;
   editingCourse?: StaffCourse;
 };
@@ -209,13 +211,18 @@ export function StaffShell({
                 Sign out
               </button>
             </nav>
-            <div className="side-user">
+            <button
+              type="button"
+              className={`side-user${active === "staff-profile" ? " active" : ""}`}
+              onClick={() => onNavigate("staff-profile")}
+              aria-label="Your profile"
+            >
               <span><Avatar photo={account.photo} initials={account.initials} /></span>
               <div>
                 <b>{account.name}</b>
                 <small>{ROLE_LABELS[account.role]}</small>
               </div>
-            </div>
+            </button>
           </>
         )}
       </aside>
@@ -241,9 +248,9 @@ export function StaffShell({
           <button
             type="button"
             className="top-profile"
-            onClick={() => onNavigate("admin")}
+            onClick={() => onNavigate("staff-profile")}
             title={account?.name}
-            aria-label={account ? `${account.name}, staff overview` : "Staff overview"}
+            aria-label={account ? `${account.name}, your profile` : "Your profile"}
           >
             <span>{account && <Avatar photo={account.photo} initials={account.initials} />}</span>
           </button>
@@ -872,6 +879,79 @@ export function InstructorWorkspace(props: StaffDashboardProps) {
           </div>
         )}
       </DataState>
+    </StaffShell>
+  );
+}
+
+// The signed-in staff member's or instructor's own page: their photo, name
+// and password, and how the courses they teach are going.
+export function StaffProfilePage(props: StaffDashboardProps & { settings: ReactNode }) {
+  const { courses, progress, onNavigate, settings } = props;
+  const viewer = useContext(StaffAccountContext);
+  // Their courses: ones they created, or ones that name them as instructor.
+  const mine = courses.filter(
+    (course) => viewer && (course.createdBy === viewer.id || course.instructor === viewer.name),
+  );
+  const insights = courseInsights(mine, progress);
+  const learners = new Set(
+    progress.filter((row) => mine.some((course) => course.id === row.course_id)).map((row) => row.user_id),
+  ).size;
+  const published = mine.filter((course) => course.status === "published").length;
+  const finished = insights.reduce((count, insight) => count + insight.finished, 0);
+
+  return (
+    <StaffShell active="staff-profile" onNavigate={onNavigate}>
+      <div className="page-title">
+        <div>
+          <span className="eyebrow">YOUR PROFILE</span>
+          <h1>{viewer ? `Hi, ${viewer.name.split(" ")[0]}!` : "Your profile"}</h1>
+          <p>Your photo, name and password, and how your courses are going.</p>
+        </div>
+        <StaffButton onClick={() => onNavigate("builder")}>Create course</StaffButton>
+      </div>
+      {settings}
+      <section className="panel teaching-panel">
+        <div className="panel-head">
+          <div>
+            <h2>Your teaching</h2>
+            <p>Courses you created or that name you as the instructor.</p>
+          </div>
+        </div>
+        <DataState {...props}>
+          <div className="stat-grid teaching-stats">
+            <StatTile tone="blue" label="Your courses" value={mine.length} detail={`${published} published, ${plural(mine.length - published, "draft")}`} />
+            <StatTile tone="green" label="Learners" value={learners} detail="have finished at least one lesson" />
+            <StatTile tone="cyan" label="Finished a course" value={finished} detail="learners who completed every lesson" />
+          </div>
+          {insights.length === 0 ? (
+            <EmptyState
+              title="No courses yet"
+              message="Your courses show up here once you create one, or when a course names you as its instructor."
+              action={<StaffButton onClick={() => onNavigate("builder")}>Create your first course</StaffButton>}
+            />
+          ) : (
+            <ul className="teaching-list">
+              {insights.map(({ course, learners: count, averagePercent }) => (
+                <li key={course.id ?? course.title}>
+                  <img {...courseImageProps(course.image)} alt="" />
+                  <div>
+                    <b>{course.title}</b>
+                    <span className={`status-badge ${course.status === "published" ? "live" : "draft"}`}>
+                      {course.status === "published" ? "Published" : "Draft"}
+                    </span>
+                    <small>
+                      {plural(count, "learner")} · {count ? `${averagePercent}% average progress` : "no one has started yet"}
+                    </small>
+                  </div>
+                  <StaffButton variant="outline" onClick={() => onNavigate("builder", course)}>
+                    Edit
+                  </StaffButton>
+                </li>
+              ))}
+            </ul>
+          )}
+        </DataState>
+      </section>
     </StaffShell>
   );
 }

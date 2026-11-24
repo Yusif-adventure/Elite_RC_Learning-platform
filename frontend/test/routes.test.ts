@@ -23,6 +23,8 @@ const addresses = [
   ["/staff", { page: "admin" }],
   ["/staff/instructors", { page: "instructor" }],
   ["/staff/members", { page: "members" }],
+  ["/staff/profile", { page: "staff-profile" }],
+  ["/instructors/Neame%20Wu", { page: "instructor-profile", name: "Neame Wu" }],
   ["/staff/courses/new", { page: "builder" }],
   ["/staff/courses/7b1f8a54-3c0e/edit", { page: "builder", courseId: "7b1f8a54-3c0e" }],
 ] as const;

@@ -7,6 +7,7 @@ import {
   InstructorWorkspace,
   MembersPage,
   StaffAccountContext,
+  StaffProfilePage,
   StaffOverview,
 } from "./features/staff/StaffPages";
 import { CourseBuilderPage } from "./features/staff/CourseBuilderPage";
@@ -25,6 +26,10 @@ import { withoutAssessments } from "./features/staff/quizDrafts";
 import { LessonQuiz } from "./features/quiz/LessonQuiz";
 import { LessonResources } from "./features/lesson/LessonResources";
 import { Avatar } from "./Avatar";
+import { descriptionText } from "./courseText";
+import { coursesTaughtBy, instructorPhoto, splitInstructors } from "./instructors";
+import "./instructorPage.css";
+import "./courseText.css";
 import { accountPhoto } from "./accountPhoto";
 import { LessonBlocks } from "./features/lesson/LessonBlocks";
 import { FinalExamPanel } from "./features/quiz/FinalExamPanel";
@@ -444,7 +449,7 @@ function roleLabel(user?: User | null) {
   return role === "instructor" ? "Instructor" : role === "staff" ? "Staff" : "Member";
 }
 
-const STAFF_PAGES: Page[] = ["admin", "builder", "instructor", "members"];
+const STAFF_PAGES: Page[] = ["admin", "builder", "instructor", "members", "staff-profile"];
 
 function memberInitials(user: User) {
   return initialsOf(memberName(user));
@@ -502,6 +507,31 @@ function routeFor(page: Page, course?: Course, lessonIndex = 0): Route {
 
 function go(page: Page, course?: Course, lessonIndex?: number) {
   navigateTo(routeFor(page, course, lessonIndex));
+}
+
+// Each instructor's name links to their page. Clicks stay on the name, so a
+// name inside a clickable course card opens the instructor, not the course.
+function InstructorNames({ names }: { names: string }) {
+  const list = splitInstructors(names);
+  return (
+    <>
+      {list.map((name, index) => (
+        <span key={name}>
+          {index > 0 && ", "}
+          <button
+            type="button"
+            className="instructor-link"
+            onClick={(event) => {
+              event.stopPropagation();
+              navigateTo({ page: "instructor-profile", name });
+            }}
+          >
+            {name}
+          </button>
+        </span>
+      ))}
+    </>
+  );
 }
 
 function PublicHeader({
@@ -569,11 +599,13 @@ function CourseCard({ course, index = 0 }: { course: Course; index?: number }) {
       <div className="course-body">
         <span className="category">{course.category}</span>
         <h3>{course.title}</h3>
-        <p>{course.desc}</p>
+        <p className="course-description">{descriptionText(course.desc)}</p>
         <div className="course-meta">
           <span>
             <Icon name="user" size={15} />
-            {course.instructor}
+            <span className="instructor-names">
+              <InstructorNames names={course.instructor} />
+            </span>
           </span>
           <span>
             <Icon name="book" size={15} />
@@ -1047,7 +1079,7 @@ function CourseDetails({
               {course.level.toUpperCase()} • {course.category.toUpperCase()}
             </span>
             <h1>{course.title}</h1>
-            <p>{course.desc}</p>
+            <p className="course-description">{descriptionText(course.desc)}</p>
             <div className="instructor">
               <img
                 {...personImageProps(course.instructorImage)}
@@ -1056,7 +1088,9 @@ function CourseDetails({
               />
               <div>
                 <small>COURSE INSTRUCTOR</small>
-                <b>{course.instructor}</b>
+                <b>
+                  <InstructorNames names={course.instructor} />
+                </b>
               </div>
             </div>
             {progress && (
@@ -1233,13 +1267,13 @@ function AppShell({
             </button>
           )}
         </nav>
-        <div className="side-user">
+        <button type="button" className="side-user" onClick={() => go("profile")} aria-label="Your profile">
           <span><Avatar photo={accountPhoto(user)} initials={memberInitials(user)} /></span>
           <div>
             <b>{memberName(user)}</b>
             <small>{roleLabel(user)}</small>
           </div>
-        </div>
+        </button>
       </aside>
       <div className="workspace">
         <header className="app-top">
@@ -1343,7 +1377,7 @@ function Dashboard({
           <div>
             <span className="badge">START HERE</span>
             <h2>{featured.title}</h2>
-            <p>{featured.desc}</p>
+            <p className="course-description">{descriptionText(featured.desc)}</p>
             <small>
               {lessonCount(featured)} lessons · {featured.duration}
             </small>
@@ -1514,6 +1548,11 @@ function Lesson({
           {lessonIndex + 1}
         </span>
         <h1>{title}</h1>
+        {course.instructor && (
+          <p className="lesson-teacher">
+            Taught by <InstructorNames names={course.instructor} />
+          </p>
+        )}
         <p className="lead">
           {started
             ? "Work through the resources below at your own pace."
@@ -2030,7 +2069,9 @@ function ResetPassword() {
   );
 }
 
-function ProfilePage({
+// The photo, name and password settings, shared by the member profile and
+// the staff workspace profile.
+function ProfileSettings({
   user,
   onSignOut,
 }: {
@@ -2071,7 +2112,7 @@ function ProfilePage({
   const saveName = async () => {
     const name = fullName.trim();
     if (!name) {
-      setNameState({ busy: false, error: "Enter your name.", done: "" });
+      setNameState({ busy: false, error: "Enter a username.", done: "" });
       return;
     }
     setNameState({ busy: true, error: "", done: "" });
@@ -2080,7 +2121,7 @@ function ProfilePage({
     setNameState(
       error
         ? { busy: false, error: error.message, done: "" }
-        : { busy: false, error: "", done: "Your name has been saved." },
+        : { busy: false, error: "", done: "Your username has been saved." },
     );
   };
 
@@ -2105,6 +2146,215 @@ function ProfilePage({
   };
 
   return (
+    <section className="panel profile-panel">
+      <div className="profile-cover" />
+      <div className="profile-main">
+        <span className="profile-avatar">
+          <Avatar photo={photo} initials={memberInitials(user)} />
+        </span>
+        <div>
+          <h2>{memberName(user)}</h2>
+          <p>
+            {roleLabel(user)} · {user.email}
+          </p>
+          <div className="profile-photo-actions">
+            <label className={`btn outline profile-photo-pick${photoState.busy ? " busy" : ""}`}>
+              <input
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,.gif"
+                disabled={photoState.busy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  void uploadPhoto(file);
+                }}
+              />
+              <span>{photoState.busy ? "Saving..." : photo ? "Change photo" : "Add a photo"}</span>
+            </label>
+            {photo && (
+              <button type="button" className="text-link" disabled={photoState.busy} onClick={() => void removePhoto()}>
+                Remove photo
+              </button>
+            )}
+            {(photoState.error || photoState.done) && (
+              <small role={photoState.error ? "alert" : "status"} className={photoState.error ? "form-error" : undefined}>
+                {photoState.error || photoState.done}
+              </small>
+            )}
+          </div>
+        </div>
+        <Button variant="outline" onClick={onSignOut}>
+          Sign out
+        </Button>
+      </div>
+      <form
+        className="profile-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveName();
+        }}
+      >
+        <h3>Your username</h3>
+        <label>
+          Username
+          <input
+            value={fullName}
+            autoComplete="name"
+            maxLength={60}
+            aria-describedby="username-note"
+            onChange={(event) => setFullName(event.target.value)}
+          />
+          <small id="username-note">
+            {user.user_metadata?.full_name
+              ? "The name everyone sees: in menus, on staff lists and on courses you create."
+              : "You are shown by the start of your email address. Choose a username to change that."}
+          </small>
+        </label>
+        <label>
+          Email address
+          <input value={user.email || ""} readOnly aria-describedby="email-note" />
+          <small id="email-note">Your email address is your sign-in and cannot be changed here.</small>
+        </label>
+        <div className="profile-actions">
+          <Button disabled={nameState.busy || fullName.trim() === memberName(user)}>
+            {nameState.busy ? "Saving..." : "Save username"}
+          </Button>
+          {nameState.error && <p role="alert" className="form-error">{nameState.error}</p>}
+          {nameState.done && <p role="status">{nameState.done}</p>}
+        </div>
+      </form>
+      <form
+        className="profile-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void savePassword();
+        }}
+      >
+        <h3>Change password</h3>
+        <label>
+          New password
+          <input
+            type="password"
+            value={password}
+            autoComplete="new-password"
+            minLength={6}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </label>
+        <label>
+          Confirm new password
+          <input
+            type="password"
+            value={confirmation}
+            autoComplete="new-password"
+            minLength={6}
+            onChange={(event) => setConfirmation(event.target.value)}
+          />
+        </label>
+        <div className="profile-actions">
+          <Button disabled={passwordState.busy || !password}>
+            {passwordState.busy ? "Saving..." : "Change password"}
+          </Button>
+          {passwordState.error && <p role="alert" className="form-error">{passwordState.error}</p>}
+          {passwordState.done && <p role="status">{passwordState.done}</p>}
+        </div>
+      </form>
+    </section>
+  );
+}
+
+// A public page for one instructor: who they are and every lesson they teach.
+function InstructorPage({
+  name,
+  user,
+  onSignOut,
+}: {
+  name: string;
+  user?: User | null;
+  onSignOut?: () => void;
+}) {
+  const taught = coursesTaughtBy(name, courses);
+  // Show the name as the courses spell it, whatever the letter case in the link.
+  const shownName =
+    taught.flatMap((course) => splitInstructors(course.instructor)).find(
+      (other) => other.toLowerCase() === name.trim().toLowerCase(),
+    ) ?? name;
+  const lessonTotal = taught.reduce((total, course) => total + lessonCount(course), 0);
+
+  return (
+    <>
+      <PublicHeader user={user} onSignOut={onSignOut} />
+      <main className="details instructor-page">
+        <button className="crumb" onClick={() => go("explore")}>
+          Explore Courses / Instructors / <b>{shownName}</b>
+        </button>
+        <section className="instructor-hero">
+          <img {...personImageProps(instructorPhoto(shownName, taught))} alt="" className="instructor-hero-photo" />
+          <div>
+            <span className="eyebrow">INSTRUCTOR</span>
+            <h1>{shownName}</h1>
+            <p>
+              {taught.length
+                ? `Teaches ${taught.length} ${taught.length === 1 ? "course" : "courses"} and ${lessonTotal} ${lessonTotal === 1 ? "lesson" : "lessons"} on Elite RC.`
+                : "No published courses yet. Check back soon!"}
+            </p>
+          </div>
+        </section>
+        {taught.length === 0 ? (
+          <Button onClick={() => go("explore")}>
+            Explore all courses <Icon name="arrow" size={16} />
+          </Button>
+        ) : (
+          <div className="instructor-courses">
+            {taught.map((course) => {
+              const lessons = course.lessonContent ?? [];
+              return (
+                <article className="instructor-course" key={course.id ?? course.title}>
+                  <button type="button" className="instructor-course-head" onClick={() => go("course", course)}>
+                    <img {...courseImageProps(course.image)} alt="" />
+                    <span>
+                      <span className="category">
+                        {course.category} · {course.level}
+                      </span>
+                      <b>{course.title}</b>
+                      <small className="course-description">{descriptionText(course.desc)}</small>
+                    </span>
+                  </button>
+                  {lessons.length > 0 && (
+                    <ol className="instructor-lessons">
+                      {lessons.map((lesson, index) => (
+                        <li key={`${lesson.section}-${lesson.title}`}>
+                          <button type="button" onClick={() => go("lesson", course, index)}>
+                            <span className="instructor-lesson-number">{index + 1}</span>
+                            <span>
+                              <b>{lesson.title}</b>
+                              <small>{lesson.section}</small>
+                            </span>
+                            <Icon name="arrow" size={16} />
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </main>
+      <Footer />
+    </>
+  );
+}
+
+function ProfilePage({
+  user,
+  onSignOut,
+}: {
+  user: User;
+  onSignOut: () => void;
+}) {
+  return (
     <AppShell active="profile" user={user} onSignOut={onSignOut}>
       <div className="page-title">
         <div>
@@ -2113,113 +2363,7 @@ function ProfilePage({
           <p>Update your photo, name and password.</p>
         </div>
       </div>
-      <section className="panel profile-panel">
-        <div className="profile-cover" />
-        <div className="profile-main">
-          <span className="profile-avatar">
-            <Avatar photo={photo} initials={memberInitials(user)} />
-          </span>
-          <div>
-            <h2>{memberName(user)}</h2>
-            <p>
-              {roleLabel(user)} · {user.email}
-            </p>
-            <div className="profile-photo-actions">
-              <label className={`btn outline profile-photo-pick${photoState.busy ? " busy" : ""}`}>
-                <input
-                  type="file"
-                  accept=".png,.jpg,.jpeg,.webp,.gif"
-                  disabled={photoState.busy}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    event.target.value = "";
-                    void uploadPhoto(file);
-                  }}
-                />
-                <span>{photoState.busy ? "Saving..." : photo ? "Change photo" : "Add a photo"}</span>
-              </label>
-              {photo && (
-                <button type="button" className="text-link" disabled={photoState.busy} onClick={() => void removePhoto()}>
-                  Remove photo
-                </button>
-              )}
-              {(photoState.error || photoState.done) && (
-                <small role={photoState.error ? "alert" : "status"} className={photoState.error ? "form-error" : undefined}>
-                  {photoState.error || photoState.done}
-                </small>
-              )}
-            </div>
-          </div>
-          <Button variant="outline" onClick={onSignOut}>
-            Sign out
-          </Button>
-        </div>
-        <form
-          className="profile-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void saveName();
-          }}
-        >
-          <h3>Your name</h3>
-          <label>
-            Full name
-            <input
-              value={fullName}
-              autoComplete="name"
-              onChange={(event) => setFullName(event.target.value)}
-            />
-          </label>
-          <label>
-            Email address
-            <input value={user.email || ""} readOnly aria-describedby="email-note" />
-            <small id="email-note">Your email address is your sign-in and cannot be changed here.</small>
-          </label>
-          <div className="profile-actions">
-            <Button disabled={nameState.busy || fullName.trim() === memberName(user)}>
-              {nameState.busy ? "Saving..." : "Save name"}
-            </Button>
-            {nameState.error && <p role="alert" className="form-error">{nameState.error}</p>}
-            {nameState.done && <p role="status">{nameState.done}</p>}
-          </div>
-        </form>
-        <form
-          className="profile-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void savePassword();
-          }}
-        >
-          <h3>Change password</h3>
-          <label>
-            New password
-            <input
-              type="password"
-              value={password}
-              autoComplete="new-password"
-              minLength={6}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </label>
-          <label>
-            Confirm new password
-            <input
-              type="password"
-              value={confirmation}
-              autoComplete="new-password"
-              minLength={6}
-              onChange={(event) => setConfirmation(event.target.value)}
-            />
-          </label>
-          <div className="profile-actions">
-            <Button disabled={passwordState.busy || !password}>
-              {passwordState.busy ? "Saving..." : "Change password"}
-            </Button>
-            {passwordState.error && <p role="alert" className="form-error">{passwordState.error}</p>}
-            {passwordState.done && <p role="status">{passwordState.done}</p>}
-          </div>
-        </form>
-      </section>
+      <ProfileSettings user={user} onSignOut={onSignOut} />
     </AppShell>
   );
 }
@@ -2303,6 +2447,8 @@ function pageTitle(route: Route, course?: Course) {
     admin: "Staff workspace",
     instructor: "Instructor workspace",
     members: "Members",
+    "staff-profile": "Your profile",
+    "instructor-profile": route.page === "instructor-profile" ? route.name : "Instructor",
     builder: course ? `Edit ${course.title}` : "New course",
     "not-found": "Page not found",
   };
@@ -2491,11 +2637,14 @@ export default function App() {
     refreshCourses((version) => version + 1);
   };
 
+  // The course id comes from the builder once it has saved a new course
+  // in place, so publishing it later updates it instead of making another.
   const saveCourse = async (course: Course) => {
     const editingCourse = page === "builder" ? routeCourse : undefined;
     const status = course.status === "draft" ? "draft" : "published";
-    const savedCourse = editingCourse?.id
-      ? await updateCourse({ ...course, id: editingCourse.id, status })
+    const id = course.id ?? editingCourse?.id;
+    const savedCourse = id
+      ? await updateCourse({ ...course, id, status })
       : await createCourse({ ...course, status });
     syncPublicCourse(savedCourse);
     staffData.reload();
@@ -2505,6 +2654,19 @@ export default function App() {
         : `"${savedCourse.title}" is saved as a draft. Only staff can see it.`,
     );
     navigateTo({ page: "admin" });
+  };
+
+  // Saves from the builder without leaving it (Save as draft and autosave).
+  const saveDraftInPlace = async (course: Course) => {
+    const savedCourse = course.id ? await updateCourse(course) : await createCourse(course);
+    syncPublicCourse(savedCourse);
+    staffData.setData((current) => ({
+      ...current,
+      courses: current.courses.some((item) => item.id === savedCourse.id)
+        ? current.courses.map((item) => (item.id === savedCourse.id ? { ...item, ...savedCourse } : item))
+        : [...current.courses, savedCourse],
+    }));
+    return savedCourse;
   };
 
   const togglePublish = async (course: Course) => {
@@ -2696,6 +2858,9 @@ export default function App() {
     case "terms":
       content = <TermsOfServicePage user={user} onSignOut={signOut} />;
       break;
+    case "instructor-profile":
+      content = <InstructorPage name={route.name} user={user} onSignOut={signOut} />;
+      break;
     case "explore":
       content = (
         <Explore
@@ -2780,6 +2945,14 @@ export default function App() {
     case "members":
       content = <MembersPage {...dashboardProps} />;
       break;
+    case "staff-profile":
+      content = user && (
+        <StaffProfilePage
+          {...dashboardProps}
+          settings={<ProfileSettings user={user} onSignOut={signOut} />}
+        />
+      );
+      break;
     case "builder":
       if (route.courseId && staffLoading) {
         content = (
@@ -2809,6 +2982,7 @@ export default function App() {
               courses={staffData.courses.length ? staffData.courses : courses}
               onNavigate={staffNavigate}
               onSaveCourse={saveCourse}
+              onSaveDraft={saveDraftInPlace}
               onDeleteCourse={deleteCourse}
               editingCourse={routeCourse}
             />
