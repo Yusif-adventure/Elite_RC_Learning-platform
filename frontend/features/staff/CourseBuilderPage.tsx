@@ -493,15 +493,6 @@ export function CourseBuilderPage({
               placeholder="e.g. Binding your transmitter"
             />
           </Field>
-          <LessonBlocksEditor
-            blocks={lesson.blocks}
-            showProblems={showProblems}
-            uploadFiles={uploadFiles}
-            templates={templates}
-            onChange={(change) =>
-              updateLesson(lesson.id, (current) => ({ blocks: change(current.blocks) }))
-            }
-          />
           <div className="form-row two">
             <FileField
               label="Slides"
@@ -595,6 +586,15 @@ export function CourseBuilderPage({
               placeholder="https://www.youtube.com/watch?v=..."
             />
           </Field>
+          <LessonBlocksEditor
+            blocks={lesson.blocks}
+            showProblems={showProblems}
+            uploadFiles={uploadFiles}
+            templates={templates}
+            onChange={(change) =>
+              updateLesson(lesson.id, (current) => ({ blocks: change(current.blocks) }))
+            }
+          />
           {lesson.quiz ? (
             <div className="lesson-quiz">
               <div className="form-group-head">

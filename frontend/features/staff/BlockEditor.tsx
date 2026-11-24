@@ -95,8 +95,8 @@ export function LessonBlocksEditor({
       <div className="block-editor-head">
         <b>Lesson content</b>
         <small>
-          Stack text, pictures, videos, PDFs and activities in the order learners should see them. Files and
-          videos added below still show after these blocks.
+          Stack text, pictures, videos, PDFs and activities in the order learners should see them. Learners see
+          these first, then the slides, video and YouTube link above.
         </small>
       </div>
       {blocks.map((block, index) => (
