@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { CATEGORY_NAMES } from "../../categories";
 import { descriptionText } from "../../courseText";
 import { splitOutcomes } from "./outcomes";
@@ -23,6 +23,7 @@ import {
   finalExamFromDraft,
   passMarkProblem,
   quizDraftFrom,
+  withSavedIds,
   quizFromDraft,
   quizProblem,
   type FinalExamDraft,
@@ -253,6 +254,7 @@ export function CourseBuilderPage({
   courses,
   onNavigate,
   onSaveCourse,
+  onSaveDraft,
   editingCourse,
 }: StaffPagesProps) {
   const [title, setTitle] = useState(editingCourse?.title ?? "");
@@ -628,37 +630,6 @@ export function CourseBuilderPage({
     </>
   );
 
-  const fullPage = (() => {
-    if (fullPageLessonId === null) return null;
-    const sectionIndex = sections.findIndex((section) =>
-      section.lessons.some((lesson) => lesson.id === fullPageLessonId),
-    );
-    if (sectionIndex < 0) return null;
-    const section = sections[sectionIndex];
-    const lessonIndex = section.lessons.findIndex((lesson) => lesson.id === fullPageLessonId);
-    const lesson = section.lessons[lessonIndex];
-    return (
-      <LessonFullPage
-        label={`${section.title.trim() || `Section ${sectionIndex + 1}`} · Lesson ${lessonIndex + 1}`}
-        title={lesson.title}
-        onClose={() => setFullPageLessonId(null)}
-        editor={<div className="lesson-builder-card lesson-fullpage-card">{renderLessonFields(lesson, lessonIndex)}</div>}
-        preview={
-          <LessonPreview
-            courseTitle={title}
-            section={section.title}
-            lessonNumber={sections.slice(0, sectionIndex).reduce((count, item) => count + item.lessons.length, 0) + lessonIndex + 1}
-            title={lesson.title}
-            blocks={lesson.blocks}
-            slides={lesson.slides}
-            video={lesson.video}
-            youtubeUrl={lesson.youtubeUrl}
-            quiz={lesson.quiz}
-          />
-        }
-      />
-    );
-  })();
 
   const buildCourse = (): StaffCourse => {
     const lessonTitles = titledLessons.map((lesson) => lesson.title.trim());
@@ -675,6 +646,7 @@ export function CourseBuilderPage({
       objectives: learningPoints.map((point) => point.trim()).filter(Boolean),
       sections: sections.map((section) => section.title.trim()).filter(Boolean),
       sampleLessons: lessonTitles.slice(0, 3),
+      ...(courseId ? { id: courseId } : {}),
       lessonContent: sections.flatMap((section) =>
         section.lessons
           .filter((lesson) => lesson.title.trim())
@@ -698,7 +670,156 @@ export function CourseBuilderPage({
 
   const isLive = editingCourse?.status === "published";
 
+  // Saving without leaving: the Save button in the full-page editor and
+  // autosave. A new course gets its id from the first save, so later saves
+  // update it instead of creating another. Live courses are not autosaved,
+  // so half-finished edits never reach learners.
+  type SaveState =
+    | { kind: "idle" }
+    | { kind: "saving" }
+    | { kind: "saved"; at: Date }
+    | { kind: "paused"; reason: string }
+    | { kind: "failed"; reason: string };
+  const AUTOSAVE_MS = 30_000;
+  const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
+  const [courseId, setCourseId] = useState(editingCourse?.id);
+  // What was last saved, without ids, to tell whether anything changed.
+  const contentKey = (course: StaffCourse) =>
+    JSON.stringify(course, (key, value) => (key === "id" || key === "key" ? undefined : value));
+  const lastSaved = useRef<string | null>(null);
+  if (lastSaved.current === null) lastSaved.current = contentKey(buildCourse());
+  const dirty = contentKey(buildCourse()) !== lastSaved.current;
+  const savingRef = useRef(false);
+
+  const saveInPlace = async (trigger: "button" | "auto") => {
+    if (!onSaveDraft || savingRef.current) return;
+    const problem = findProblem();
+    if (problem) {
+      if (trigger === "button") setShowProblems(true);
+      setSaveState({ kind: "paused", reason: problem });
+      return;
+    }
+    if (uploadsInProgress > 0) {
+      setSaveState({ kind: "paused", reason: "Waiting for uploads to finish." });
+      return;
+    }
+    const built = buildCourse();
+    const course = { ...built, status: isLive ? ("published" as const) : ("draft" as const) };
+    savingRef.current = true;
+    setSaveState({ kind: "saving" });
+    try {
+      const saved = await onSaveDraft(course);
+      lastSaved.current = contentKey(built);
+      setCourseId(saved.id);
+      // Lessons and quizzes take the ids the server gave them.
+      const savedLessons = saved.lessonContent ?? [];
+      setSections((current) =>
+        current.map((section) => ({
+          ...section,
+          lessons: section.lessons.map((lesson) => {
+            const match = savedLessons.find(
+              (item) => item.section === section.title.trim() && item.title === lesson.title.trim(),
+            );
+            if (!match) return lesson;
+            return {
+              ...lesson,
+              savedId: match.id,
+              quiz: lesson.quiz && withSavedIds(lesson.quiz, match.quiz),
+            };
+          }),
+        })),
+      );
+      setFinalExam((current) => current && withSavedIds(current, saved.finalExam));
+      setSaveState({ kind: "saved", at: new Date() });
+    } catch (saveError) {
+      setSaveState({ kind: "failed", reason: getErrorMessage(saveError) });
+    } finally {
+      savingRef.current = false;
+    }
+  };
+
+  const autosave = useRef(() => {});
+  autosave.current = () => {
+    if (!isLive && dirty) void saveInPlace("auto");
+  };
+  useEffect(() => {
+    if (!onSaveDraft) return;
+    const timer = window.setInterval(() => autosave.current(), AUTOSAVE_MS);
+    return () => window.clearInterval(timer);
+  }, [onSaveDraft]);
+
+  // Leaving the page with unsaved changes asks first.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  const saveStatus =
+    saveState.kind === "saving"
+      ? "Saving..."
+      : saveState.kind === "failed"
+        ? `Not saved: ${saveState.reason}`
+        : saveState.kind === "paused" && dirty
+          ? `Not saved yet: ${saveState.reason}`
+          : dirty
+            ? isLive
+              ? "Unsaved changes. Live courses are not autosaved."
+              : "Unsaved changes. Autosaves every 30 seconds."
+            : saveState.kind === "saved"
+              ? `All changes saved at ${saveState.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+              : "No changes yet";
+
+  const saveControls = onSaveDraft ? (
+    <div className="save-controls">
+      <small className={saveState.kind === "failed" ? "save-status failed" : "save-status"} role="status">
+        {saveStatus}
+      </small>
+      <StaffButton
+        variant="outline"
+        disabled={saveState.kind === "saving" || (!dirty && Boolean(courseId))}
+        onClick={() => void saveInPlace("button")}
+      >
+        {saveState.kind === "saving" ? "Saving..." : isLive ? "Save changes" : "Save as draft"}
+      </StaffButton>
+    </div>
+  ) : null;
+
   // A draft is visible to staff only; publishing puts the course in front of learners.
+  const fullPage = (() => {
+    if (fullPageLessonId === null) return null;
+    const sectionIndex = sections.findIndex((section) =>
+      section.lessons.some((lesson) => lesson.id === fullPageLessonId),
+    );
+    if (sectionIndex < 0) return null;
+    const section = sections[sectionIndex];
+    const lessonIndex = section.lessons.findIndex((lesson) => lesson.id === fullPageLessonId);
+    const lesson = section.lessons[lessonIndex];
+    return (
+      <LessonFullPage
+        label={`${section.title.trim() || `Section ${sectionIndex + 1}`} · Lesson ${lessonIndex + 1}`}
+        title={lesson.title}
+        onClose={() => setFullPageLessonId(null)}
+        actions={saveControls}
+        editor={<div className="lesson-builder-card lesson-fullpage-card">{renderLessonFields(lesson, lessonIndex)}</div>}
+        preview={
+          <LessonPreview
+            courseTitle={title}
+            section={section.title}
+            lessonNumber={sections.slice(0, sectionIndex).reduce((count, item) => count + item.lessons.length, 0) + lessonIndex + 1}
+            title={lesson.title}
+            blocks={lesson.blocks}
+            slides={lesson.slides}
+            video={lesson.video}
+            youtubeUrl={lesson.youtubeUrl}
+            quiz={lesson.quiz}
+          />
+        }
+      />
+    );
+  })();
+
   const saveCourse = async (status: "draft" | "published") => {
     setError("");
     if (findProblem()) {
@@ -1081,6 +1202,8 @@ export function CourseBuilderPage({
                 <span role="status">
                   Uploading files. You can save when they finish.
                 </span>
+              ) : onSaveDraft && (dirty || saveState.kind !== "idle") ? (
+                <span role="status">{saveStatus}</span>
               ) : (
                 <span>
                   {title.trim() && category

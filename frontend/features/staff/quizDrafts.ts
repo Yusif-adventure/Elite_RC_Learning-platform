@@ -171,3 +171,26 @@ export function withoutAssessments<T extends WithAssessments>(course: T): Omit<T
     lessonContent: course.lessonContent.map(({ quiz: _quiz, ...lesson }) => lesson),
   };
 }
+
+// After a save, gives a draft the ids the server assigned, matching
+// questions and choices by position, so the next save updates them instead
+// of creating them again. Text typed during the save is kept.
+export function withSavedIds<Draft extends QuizDraft>(draft: Draft, saved?: SavedQuiz | null): Draft {
+  if (!saved) return draft;
+  return {
+    ...draft,
+    id: draft.id ?? saved.id,
+    questions: draft.questions.map((question, questionIndex) => {
+      const savedQuestion = saved.questions[questionIndex];
+      if (!savedQuestion) return question;
+      return {
+        ...question,
+        id: question.id ?? savedQuestion.id,
+        choices: question.choices.map((choice, choiceIndex) => ({
+          ...choice,
+          id: choice.id ?? savedQuestion.choices[choiceIndex]?.id,
+        })),
+      };
+    }),
+  };
+}

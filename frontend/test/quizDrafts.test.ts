@@ -204,3 +204,24 @@ test("the learner course list keeps lessons but drops quizzes and the final exam
   assert.deepEqual(publicCourse.lessonContent, [{ title: "Welcome", section: "Setup", slides: [] }]);
   assert.equal(JSON.stringify(publicCourse).includes("isCorrect"), false);
 });
+
+test("a saved quiz's ids are copied onto the draft by position, keeping what was typed", async () => {
+  const { withSavedIds } = await import("../features/staff/quizDrafts");
+  const draft = {
+    questions: [
+      { key: 1, questionText: "Edited while saving", explanation: "", choices: [{ key: 2, text: "A", isCorrect: true }, { key: 3, text: "B", isCorrect: false }] },
+      { key: 4, questionText: "Added while saving", explanation: "", choices: [{ key: 5, text: "C", isCorrect: true }] },
+    ],
+  };
+  const saved = {
+    id: "quiz-1",
+    questions: [{ id: "q1", questionText: "Old text", explanation: "", choices: [{ id: "c1", text: "A", isCorrect: true }, { id: "c2", text: "B", isCorrect: false }] }],
+  };
+  const merged = withSavedIds(draft, saved);
+  assert.equal(merged.id, "quiz-1");
+  assert.equal(merged.questions[0].id, "q1");
+  assert.equal(merged.questions[0].questionText, "Edited while saving");
+  assert.deepEqual(merged.questions[0].choices.map((choice) => choice.id), ["c1", "c2"]);
+  assert.equal(merged.questions[1].id, undefined);
+  assert.equal(withSavedIds(draft, null), draft);
+});

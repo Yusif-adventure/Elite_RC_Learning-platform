@@ -82,6 +82,8 @@ export type StaffPagesProps = {
   courses: StaffCourse[];
   onNavigate: (page: StaffPage, course?: StaffCourse) => void;
   onSaveCourse: (course: StaffCourse) => Promise<void>;
+  // Saves without leaving the builder and returns the saved course.
+  onSaveDraft?: (course: StaffCourse) => Promise<StaffCourse>;
   onDeleteCourse: (course: StaffCourse) => void;
   editingCourse?: StaffCourse;
 };

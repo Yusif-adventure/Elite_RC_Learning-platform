@@ -2637,11 +2637,14 @@ export default function App() {
     refreshCourses((version) => version + 1);
   };
 
+  // The course id comes from the builder once it has saved a new course
+  // in place, so publishing it later updates it instead of making another.
   const saveCourse = async (course: Course) => {
     const editingCourse = page === "builder" ? routeCourse : undefined;
     const status = course.status === "draft" ? "draft" : "published";
-    const savedCourse = editingCourse?.id
-      ? await updateCourse({ ...course, id: editingCourse.id, status })
+    const id = course.id ?? editingCourse?.id;
+    const savedCourse = id
+      ? await updateCourse({ ...course, id, status })
       : await createCourse({ ...course, status });
     syncPublicCourse(savedCourse);
     staffData.reload();
@@ -2651,6 +2654,19 @@ export default function App() {
         : `"${savedCourse.title}" is saved as a draft. Only staff can see it.`,
     );
     navigateTo({ page: "admin" });
+  };
+
+  // Saves from the builder without leaving it (Save as draft and autosave).
+  const saveDraftInPlace = async (course: Course) => {
+    const savedCourse = course.id ? await updateCourse(course) : await createCourse(course);
+    syncPublicCourse(savedCourse);
+    staffData.setData((current) => ({
+      ...current,
+      courses: current.courses.some((item) => item.id === savedCourse.id)
+        ? current.courses.map((item) => (item.id === savedCourse.id ? { ...item, ...savedCourse } : item))
+        : [...current.courses, savedCourse],
+    }));
+    return savedCourse;
   };
 
   const togglePublish = async (course: Course) => {
@@ -2966,6 +2982,7 @@ export default function App() {
               courses={staffData.courses.length ? staffData.courses : courses}
               onNavigate={staffNavigate}
               onSaveCourse={saveCourse}
+              onSaveDraft={saveDraftInPlace}
               onDeleteCourse={deleteCourse}
               editingCourse={routeCourse}
             />

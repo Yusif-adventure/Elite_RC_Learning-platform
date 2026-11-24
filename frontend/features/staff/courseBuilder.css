@@ -1201,3 +1201,47 @@
   flex: none;
   white-space: nowrap;
 }
+
+/* Save as draft and autosave status */
+.lesson-fullpage-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.save-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.save-status {
+  max-width: 260px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.save-status.failed {
+  color: var(--red);
+  font-weight: 600;
+}
+
+@media (max-width: 760px) {
+  .lesson-fullpage-right {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+  }
+
+  .save-controls {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+
+  .save-status {
+    text-align: left;
+  }
+}
