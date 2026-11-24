@@ -241,14 +241,21 @@ ${html}
 <script>
 (function () {
   var last = 0;
+  // The height of the content itself. The page's scrollHeight would include
+  // the frame's own height, so the frame could only ever grow.
+  function contentHeight() {
+    var body = document.body;
+    var margin = parseFloat(getComputedStyle(body).marginBottom) || 0;
+    return Math.ceil(body.getBoundingClientRect().bottom + window.scrollY + margin);
+  }
   function report() {
-    var height = Math.ceil(document.documentElement.scrollHeight);
-    if (height !== last) {
+    var height = contentHeight();
+    if (Math.abs(height - last) > 1) {
       last = height;
       parent.postMessage({ type: ${JSON.stringify(FRAME_MESSAGE)}, frame: ${JSON.stringify(frameId)}, height: height }, "*");
     }
   }
-  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.body);
   window.addEventListener("load", report);
   setInterval(report, 1000);
   report();

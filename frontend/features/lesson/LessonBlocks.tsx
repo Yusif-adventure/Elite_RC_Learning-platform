@@ -112,7 +112,9 @@ export function SandboxedHtml({ html, title }: { html: string; title: string }) 
       if (event.source !== frameRef.current?.contentWindow) return;
       const data = event.data as { type?: string; frame?: string; height?: number };
       if (data?.type !== FRAME_MESSAGE || data.frame !== frameId || typeof data.height !== "number") return;
-      setHeight(Math.min(Math.max(Math.ceil(data.height) + 8, 60), 4000));
+      // The frame's 1px border on each side is added, and nothing more, so
+      // its height settles instead of creeping up.
+      setHeight(Math.min(Math.max(Math.ceil(data.height) + 2, 60), 4000));
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
