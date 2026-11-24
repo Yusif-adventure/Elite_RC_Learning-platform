@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ConfirmDialog } from "./Feedback";
 import {
   BLOCK_TYPES,
   MAX_ARRANGE_LINES,
@@ -74,12 +75,18 @@ export function LessonBlocksEditor({
   const move = (from: number, to: number) => onChange((current) => moveItem(current, from, to));
   const replace = (id: string, block: LessonBlock) =>
     onChange((current) => current.map((item) => (item.id === id ? block : item)));
-  const removeTemplate = async (template: BlockTemplate) => {
-    if (!window.confirm(`Delete the "${template.name}" template? Lessons that already use it keep their copy.`)) return;
+  // The template waiting for a yes in the delete dialog.
+  const [deleting, setDeleting] = useState<BlockTemplate | null>(null);
+  const [deleteState, setDeleteState] = useState({ busy: false, error: "" });
+  const removeTemplate = async () => {
+    if (!deleting) return;
+    setDeleteState({ busy: true, error: "" });
     try {
-      await templates.remove(template);
+      await templates.remove(deleting);
+      setDeleting(null);
+      setDeleteState({ busy: false, error: "" });
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "The template could not be deleted.");
+      setDeleteState({ busy: false, error: error instanceof Error ? error.message : "The template could not be deleted." });
     }
   };
 
@@ -143,9 +150,13 @@ export function LessonBlocksEditor({
                 </button>
                 <button
                   type="button"
-                  className="block-tool"
+                  className="block-template-delete"
                   aria-label={`Delete the ${template.name} template`}
-                  onClick={() => void removeTemplate(template)}
+                  title="Delete template"
+                  onClick={() => {
+                    setDeleteState({ busy: false, error: "" });
+                    setDeleting(template);
+                  }}
                 >
                   ×
                 </button>
@@ -157,6 +168,24 @@ export function LessonBlocksEditor({
             None yet. Write an HTML block with {"{{placeholders}}"} for the parts that change, then choose Save as
             template.
           </small>
+        )}
+        {deleting && (
+          <ConfirmDialog
+            title={`Delete the "${deleting.name}" template?`}
+            confirmLabel="Delete template"
+            busyLabel="Deleting..."
+            busy={deleteState.busy}
+            onConfirm={() => void removeTemplate()}
+            onCancel={() => setDeleting(null)}
+          >
+            <p>It disappears from From your templates for every instructor.</p>
+            <p>Lessons that already use it keep their own copy and do not change.</p>
+            {deleteState.error && (
+              <p className="form-error" role="alert">
+                {deleteState.error}
+              </p>
+            )}
+          </ConfirmDialog>
         )}
       </div>
     </div>
