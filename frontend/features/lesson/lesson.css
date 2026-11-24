@@ -206,22 +206,63 @@
 
 .arrange-line {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  position: relative;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 8px;
-  padding: 4px 4px 4px 4px;
+  gap: 6px;
+  padding: 4px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: #fff;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-.arrange-line[draggable="true"] {
-  cursor: grab;
+/* The row being dragged lifts above the others. */
+.arrange-line.is-dragged {
+  z-index: 2;
+  border-color: var(--blue);
+  box-shadow: 0 12px 28px rgba(8, 35, 71, 0.18);
 }
 
-.arrange-line.is-dragging {
-  opacity: 0.5;
+.arrange-lines.is-dragging {
+  user-select: none;
+}
+
+.arrange-handle {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: #9fb0c3;
+  background: none;
+  cursor: grab;
+  /* Holding the handle drags the line instead of scrolling the page. */
+  touch-action: none;
+}
+
+.arrange-handle svg {
+  width: 12px;
+  height: 20px;
+  fill: currentColor;
+}
+
+.arrange-handle:hover,
+.arrange-handle:focus-visible {
+  color: var(--blue);
+  background: var(--sky);
+}
+
+.is-dragged .arrange-handle {
+  color: var(--blue);
+  cursor: grabbing;
+}
+
+.arrange-handle:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .arrange-line.is-selected {
@@ -332,7 +373,7 @@
   }
 
   .arrange-line {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .arrange-mark {
@@ -345,7 +386,10 @@
     flex: 1 1 auto;
   }
 
+  /* Long lines wrap on phones instead of scrolling sideways; indentation stays. */
   .arrange-code code {
     font-size: 13px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 }

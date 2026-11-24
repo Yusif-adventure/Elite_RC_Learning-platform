@@ -100,20 +100,41 @@ export function arrangeLines(code: string): string[] {
   return code.replace(/\r\n?/g, "\n").split("\n").filter((line) => line.trim()).map((line) => line.replace(/\s+$/, ""));
 }
 
-// Shuffles the lines, never leaving them already in order when they can be
-// out of order. `random` is replaceable for tests.
-export function shuffleLines(lines: string[], random: () => number = Math.random): string[] {
-  if (new Set(lines).size < 2) return [...lines];
+// Shuffles the items, never leaving their text already in order when it can
+// be out of order. `random` is replaceable for tests.
+export function shuffleItems<T>(items: T[], textOf: (item: T) => string, random: () => number = Math.random): T[] {
+  const texts = items.map(textOf);
+  if (new Set(texts).size < 2) return [...items];
   for (let tries = 0; tries < 20; tries += 1) {
-    const shuffled = [...lines];
+    const shuffled = [...items];
     for (let index = shuffled.length - 1; index > 0; index -= 1) {
       const swap = Math.floor(random() * (index + 1));
       [shuffled[index], shuffled[swap]] = [shuffled[swap], shuffled[index]];
     }
-    if (shuffled.some((line, index) => line !== lines[index])) return shuffled;
+    if (shuffled.some((item, index) => textOf(item) !== texts[index])) return shuffled;
   }
-  // Very unlikely: move the first line to the end.
-  return [...lines.slice(1), lines[0]];
+  // Very unlikely: move the first item to the end.
+  return [...items.slice(1), items[0]];
+}
+
+export function shuffleLines(lines: string[], random: () => number = Math.random): string[] {
+  return shuffleItems(lines, (line) => line, random);
+}
+
+// Where a dragged row would land: the number of other rows whose middle is
+// above the dragged row's middle. Uses where the rows were when the drag
+// started, so moving rows aside never changes the answer (no jitter).
+export function dropIndex(rows: { top: number; height: number }[], from: number, draggedMiddle: number): number {
+  return rows.filter((row, index) => index !== from && row.top + row.height / 2 < draggedMiddle).length;
+}
+
+// How far a row slides while another is dragged from `from` to `over`:
+// rows in between make room by moving one slot the other way.
+export function dragShift(index: number, from: number, over: number, slot: number): number {
+  if (index === from) return 0;
+  if (from < over && index > from && index <= over) return -slot;
+  if (over < from && index >= over && index < from) return slot;
+  return 0;
 }
 
 // Which lines are in the right place. Lines are compared by their text, so
