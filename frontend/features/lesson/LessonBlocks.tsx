@@ -8,7 +8,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
-import { RichText } from "../../RichText";
+import { QuizText, RichText } from "../../RichText";
 import {
   FRAME_MESSAGE,
   arrangeLines,
@@ -59,6 +59,8 @@ export function LessonBlockView({ block }: { block: LessonBlock }) {
       );
     case "html":
       return <SandboxedHtml html={block.html} title={block.title || "Interactive activity"} />;
+    case "flipcard":
+      return <FlipCard front={block.front} back={block.back} />;
     case "template":
       return <SandboxedHtml html={fillTemplate(block.html, block.fields, block.values)} title={block.templateName} />;
     case "arrange":
@@ -81,6 +83,47 @@ function LessonImage({ url, alt, caption }: { url: string; alt: string; caption?
       )}
       {caption && <figcaption>{caption}</figcaption>}
     </figure>
+  );
+}
+
+// A question card that flips over to show its answer. Both sides keep
+// their line breaks and show `inline code`.
+export function FlipCard({ front, back }: { front: string; back: string }) {
+  const [flipped, setFlipped] = useState(false);
+  const [flips, setFlips] = useState(0);
+  return (
+    <div className={`lesson-block flipcard${flipped ? " is-flipped" : ""}`}>
+      <button
+        type="button"
+        className="flipcard-button"
+        aria-pressed={flipped}
+        aria-label={flipped ? "Flip card, showing the answer. Press to see the question." : "Flip card, showing the question. Press to see the answer."}
+        onClick={() => {
+          setFlipped((value) => !value);
+          setFlips((count) => count + 1);
+        }}
+      >
+        <span className="flipcard-inner">
+          <span className="flipcard-face flipcard-front" aria-hidden={flipped}>
+            <span className="flipcard-tag">Question</span>
+            <span className="flipcard-text"><QuizText text={front} /></span>
+            <span className="flipcard-spark" aria-hidden="true">?</span>
+          </span>
+          <span className="flipcard-face flipcard-back" aria-hidden={!flipped}>
+            <span className="flipcard-tag">Answer</span>
+            <span className="flipcard-text"><QuizText text={back} /></span>
+            <span className="flipcard-spark" aria-hidden="true">✓</span>
+          </span>
+        </span>
+      </button>
+      <p className="flipcard-hint" aria-live="polite">
+        {flipped
+          ? flips > 2
+            ? "Got it? Flip back and test yourself again"
+            : "Tap again to flip back"
+          : "Tap the card to flip it"}
+      </p>
+    </div>
   );
 }
 

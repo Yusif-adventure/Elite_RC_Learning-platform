@@ -323,6 +323,7 @@ const invalidCourses = [
   ["an image block that is not a web link", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "image", url: "javascript:alert(1)", alt: "A board" }] }] }],
   ["a YouTube block with another site's link", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "youtube", url: "https://example.com/watch?v=abc" }] }] }],
   ["a PDF block that is not a web link", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "pdf", name: "a.pdf", url: "file:///a.pdf" }] }] }],
+  ["a flip card with an empty back", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "flipcard", front: "Q", back: " " }] }] }],
   ["an empty HTML block", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "html", html: "" }] }] }],
   ["an arrange block with one line", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: [{ id: "a", type: "arrange", code: "void setup() {}\n\n" }] }] }],
   ["too many blocks", { lessonContent: [{ title: "Welcome", section: "Setup", slides: [], blocks: Array.from({ length: 61 }, (_, index) => ({ id: String(index), type: "text", text: "Hi" })) }] }],
@@ -1001,6 +1002,7 @@ const everyBlock = [
   { id: "p1", type: "pdf", name: "sheet.pdf", url: "https://example.com/sheet.pdf" },
   { id: "v1", type: "video", name: "clip.mp4", url: "https://example.com/clip.mp4" },
   { id: "h1", type: "html", html: "<button>Press me</button><script>1</script>", title: "Button" },
+  { id: "f1", type: "flipcard", front: "What does pinMode do?", back: "Sets a pin as an input or an output." },
   { id: "a1", type: "arrange", code: "void setup() {\n  pinMode(13, OUTPUT);\n}", title: "Order it", instructions: "Drag the lines." },
 ];
 

@@ -219,7 +219,7 @@ function BlockCard({
 }) {
   const [previewing, setPreviewing] = useState(false);
   const problem = blockProblem(block);
-  const canPreview = ["text", "html", "arrange", "template"].includes(block.type) && !problem;
+  const canPreview = ["text", "html", "arrange", "template", "flipcard"].includes(block.type) && !problem;
   const invalid = (bad: boolean) => (showProblems && bad ? "invalid" : undefined);
 
   return (
@@ -370,6 +370,31 @@ function BlockCard({
               onUpdate={onUpdate}
               onReplace={onReplace}
             />
+          )}
+
+          {block.type === "flipcard" && (
+            <>
+              <Field label="Front (the question)" required hint="Line breaks are kept, and `backticks` show code.">
+                <textarea
+                  className={invalid(!block.front.trim())}
+                  rows={2}
+                  maxLength={500}
+                  value={block.front}
+                  onChange={(event) => onUpdate({ front: event.target.value })}
+                  placeholder="e.g. What does pinMode(13, OUTPUT) do?"
+                />
+              </Field>
+              <Field label="Back (the answer)" required>
+                <textarea
+                  className={invalid(Boolean(block.front.trim()) && !block.back.trim())}
+                  rows={3}
+                  maxLength={1000}
+                  value={block.back}
+                  onChange={(event) => onUpdate({ back: event.target.value })}
+                  placeholder="e.g. It tells pin 13 to send power out, so it can light the LED."
+                />
+              </Field>
+            </>
           )}
 
           {block.type === "arrange" && (

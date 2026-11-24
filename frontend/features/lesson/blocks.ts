@@ -20,6 +20,7 @@ export type LessonBlock =
   | { id: string; type: "youtube"; url: string; title?: string }
   | { id: string; type: "pdf"; url: string; name: string }
   | { id: string; type: "video"; url: string; name: string }
+  | { id: string; type: "flipcard"; front: string; back: string }
   | { id: string; type: "html"; html: string; title?: string }
   | { id: string; type: "arrange"; code: string; title?: string; instructions?: string }
   // A lesson keeps its own copy of the template, so later changes to the
@@ -44,6 +45,7 @@ export const BLOCK_TYPES: { type: BlockType; label: string; description: string 
   { type: "youtube", label: "YouTube", description: "A video that plays in the lesson" },
   { type: "pdf", label: "PDF", description: "Read on the page or download" },
   { type: "video", label: "Video file", description: "An uploaded MP4 clip" },
+  { type: "flipcard", label: "Flip card", description: "A question that flips to its answer" },
   { type: "arrange", label: "Arrange the lines", description: "Put shuffled code in order" },
   { type: "html", label: "HTML / CSS / JS", description: "Your own design or activity" },
 ];
@@ -68,6 +70,8 @@ export function newBlock(type: Exclude<BlockType, "template">): LessonBlock {
       return { id, type, url: "", name: "" };
     case "html":
       return { id, type, html: "" };
+    case "flipcard":
+      return { id, type, front: "", back: "" };
     case "arrange":
       return { id, type, code: "" };
   }
@@ -169,6 +173,9 @@ export function blockProblem(block: LessonBlock): string {
       return block.url ? "" : "Upload a video for this video block, or remove it.";
     case "html":
       return block.html.trim() ? "" : "Add some HTML to this HTML block, or remove it.";
+    case "flipcard":
+      if (!block.front.trim()) return "Add a question or prompt to the front of this flip card.";
+      return block.back.trim() ? "" : "Add the answer to the back of this flip card.";
     case "arrange": {
       const count = arrangeLines(block.code).length;
       if (count < 2) return "An arrange-the-lines block needs at least 2 lines of code.";

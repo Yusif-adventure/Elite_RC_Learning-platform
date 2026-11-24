@@ -67,7 +67,7 @@ test("moving an item keeps the rest in order and ignores moves off the ends", ()
 });
 
 test("new blocks start empty and say what they still need", () => {
-  for (const type of ["text", "image", "youtube", "pdf", "video", "html", "arrange"] as const) {
+  for (const type of ["text", "image", "youtube", "pdf", "video", "flipcard", "html", "arrange"] as const) {
     const block = newBlock(type);
     assert.equal(block.type, type);
     assert.notEqual(blockProblem(block), "", type);
@@ -164,4 +164,10 @@ test("rows between the start and the drop slide one slot to make room", () => {
   assert.deepEqual([0, 1, 2, 3].map((index) => dragShift(index, 3, 1, 50)), [0, 50, 50, 0]);
   // Not moved: nothing shifts.
   assert.deepEqual([0, 1, 2].map((index) => dragShift(index, 1, 1, 50)), [0, 0, 0]);
+});
+
+test("a flip card needs both sides filled in", () => {
+  assert.match(blockProblem({ id: "1", type: "flipcard", front: "", back: "x" }), /front/);
+  assert.match(blockProblem({ id: "1", type: "flipcard", front: "Q", back: " " }), /back/);
+  assert.equal(blockProblem({ id: "1", type: "flipcard", front: "Q", back: "A" }), "");
 });

@@ -393,3 +393,116 @@
     overflow-wrap: anywhere;
   }
 }
+
+/* Flip card */
+.flipcard {
+  max-width: 560px;
+  margin-inline: auto;
+  perspective: 1200px;
+}
+
+.flipcard-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.flipcard-button:focus-visible {
+  outline: 3px solid rgba(19, 113, 232, 0.35);
+  outline-offset: 4px;
+  border-radius: 18px;
+}
+
+.flipcard-inner {
+  display: grid;
+  transition: transform 0.7s cubic-bezier(0.3, 1.35, 0.5, 1);
+  transform-style: preserve-3d;
+}
+
+.flipcard.is-flipped .flipcard-inner {
+  transform: rotateY(180deg);
+}
+
+/* Both faces share one grid cell, so the card is as tall as its longer side. */
+.flipcard-face {
+  grid-area: 1 / 1;
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 200px;
+  padding: 44px 24px 30px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.flipcard-front {
+  color: #fff;
+  background: linear-gradient(145deg, var(--blue), var(--cyan));
+  box-shadow: 0 14px 30px rgba(19, 113, 232, 0.22);
+}
+
+.flipcard-back {
+  color: var(--navy);
+  background: #fff;
+  transform: rotateY(180deg);
+  box-shadow: 0 14px 30px rgba(8, 35, 71, 0.1);
+}
+
+.flipcard-front code {
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.flipcard-tag {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.flipcard-front .flipcard-tag {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.flipcard-back .flipcard-tag {
+  border: 1px solid var(--green);
+  color: var(--green);
+}
+
+.flipcard-spark {
+  position: absolute;
+  right: 18px;
+  bottom: 12px;
+  font-size: 22px;
+  opacity: 0.85;
+}
+
+.flipcard-hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flipcard-inner {
+    transition: none;
+  }
+}
