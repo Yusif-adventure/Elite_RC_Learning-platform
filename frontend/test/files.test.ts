@@ -21,3 +21,9 @@ test("files elsewhere keep their link", () => {
   assert.equal(downloadLink({ name: "a.pdf", url: "https://example.com/a.pdf" }), "https://example.com/a.pdf");
   assert.equal(downloadLink({ name: "a.pdf", url: "not a link" }), "not a link");
 });
+
+test("PDFs shown on the page open without the side panel, whatever the link had", async () => {
+  const { inlinePdfLink } = await import("../features/lesson/files");
+  assert.equal(inlinePdfLink("https://x.example/a.pdf"), "https://x.example/a.pdf#navpanes=0&pagemode=none&view=FitH");
+  assert.equal(inlinePdfLink("https://x.example/a.pdf?v=2#page=3"), "https://x.example/a.pdf?v=2#navpanes=0&pagemode=none&view=FitH");
+});

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { downloadLink, isPdf, type FileLink } from "./files";
+import { downloadLink, inlinePdfLink, isPdf, type FileLink } from "./files";
 import "./lesson.css";
 
 // A lesson file. PDFs can be read on the page or downloaded; other files,
@@ -40,7 +40,7 @@ export function PdfResource({
       </div>
       {open && (
         <>
-          <iframe className="file-resource-frame" src={file.url} title={file.name} loading="lazy" />
+          <iframe className="file-resource-frame" src={inlinePdfLink(file.url)} title={file.name} loading="lazy" />
           <small className="file-resource-note">
             Not showing?{" "}
             <a href={file.url} target="_blank" rel="noreferrer">
